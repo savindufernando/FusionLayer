@@ -1,0 +1,65 @@
+# =============================================================================
+# Fusion Layer Configuration
+# Risk integration settings for combining TSR + DZ module outputs
+# =============================================================================
+
+# Timezone (for timestamp generation)
+timezone: "Asia/Colombo"
+
+# ─── Fusion Method ────────────────────────────────────────────────────────
+# "dempster_shafer" (default, research-grade) or "weighted_average" (baseline)
+fusion:
+  method: "dempster_shafer"
+
+  # Base evidence weights (used in weighted_average mode as fallback)
+  tsr_weight: 0.35
+  dz_weight: 0.65
+
+  # DS Theory thresholds
+  conflict_threshold: 0.3       # Log warning if DS conflict K > this
+
+# ─── Risk Level Thresholds ────────────────────────────────────────────────
+# On the fused 0-100 scale (after pignistic transform + EMA)
+threshold_high: 65.0            # Score >= 65 → HIGH
+threshold_medium: 35.0          # Score >= 35 → MEDIUM
+
+# ─── EMA Smoothing ────────────────────────────────────────────────────────
+# Exponential Moving Average for temporal stability of fused scores
+# Higher alpha = more responsive, lower = smoother
+ema_alpha: 0.35
+
+# ─── Temporal Sign Buffer ───────────────────────────────────────────────
+buffer:
+  sign_decay_lambda: 0.1       # Exponential decay rate for sign relevance
+  max_signs: 20                 # Max signs retained in buffer
+  max_age_seconds: 60           # Max age before sign expires
+
+# ─── Module Confidence Thresholds ────────────────────────────────────────
+# Ignore module outputs below these confidence levels
+min_tsr_confidence: 0.6         # TSR detections below this are discarded
+min_dz_confidence: 0.3          # DZ predictions below this → uncertainty
+
+# ─── API Settings ────────────────────────────────────────────────────────
+api:
+  host: "0.0.0.0"
+  port: 8002
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://localhost:5173"
+
+# ─── Module Endpoints ────────────────────────────────────────────────────
+# Endpoints for calling TSR and DZ modules (when running as services)
+modules:
+  tsr:
+    url: "http://localhost:8001"
+    predict_endpoint: "/predict"
+    timeout_seconds: 5
+  dz:
+    url: "http://localhost:8000"
+    predict_endpoint: "/api/predict"
+    timeout_seconds: 5
+
+# ─── Logging ─────────────────────────────────────────────────────────────
+logging:
+  level: "INFO"
+  conflict_log_max_entries: 1000
