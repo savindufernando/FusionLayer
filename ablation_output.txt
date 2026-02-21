@@ -1,0 +1,94 @@
+﻿================================================================================
+ABLATION STUDY: Fusion Method Comparison
+================================================================================
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+Scenario: Curve in Rain
+  Sharp curve on wet road ΓåÆ should amplify DZ risk
+  DZ: 42, TSR: curve_to_left (conf: 94%)
+  Results:
+    DZ-Only:       42.0
+    Weighted Avg:  41.3
+    DS Fusion:     70.7  UP (+28.7) OK
+    DS Details:  Bel=0.674 Pl=0.721 K=0.375
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+Scenario: Safe Road + Parking
+  Informational sign on safe road ΓåÆ minimal change
+  DZ: 15, TSR: parking (conf: 95%)
+  Results:
+    DZ-Only:       15.0
+    Weighted Avg:  10.8
+    DS Fusion:     12.3  DOWN (-2.7) OK
+    DS Details:  Bel=0.113 Pl=0.197 K=0.025
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+Scenario: High Risk + Accident
+  Accident sign compounds existing high risk
+  DZ: 75, TSR: accident (conf: 95%)
+  Results:
+    DZ-Only:       75.0
+    Weighted Avg:  76.8
+    DS Fusion:     92.3  UP (+17.3) OK
+    DS Details:  Bel=0.905 Pl=0.924 K=0.214
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+Scenario: Medium Risk + Speed Limit School
+  School zone speed limit ΓåÆ heightened caution
+  DZ: 45, TSR: maximum_speed_limit_(all_vehicles_within_school_areas_and_hospitals) (conf: 88%)
+  Results:
+    DZ-Only:       45.0
+    Weighted Avg:  39.8
+    DS Fusion:     48.6  UP (+3.6) OK
+    DS Details:  Bel=0.436 Pl=0.539 K=0.194
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+Scenario: Low Risk + Stop Sign
+  Stop sign indicates intersection ΓåÆ risk increase
+  DZ: 25, TSR: stop (conf: 91%)
+  Results:
+    DZ-Only:       25.0
+    Weighted Avg:  35.5
+    DS Fusion:     42.8  UP (+17.8) OK
+    DS Details:  Bel=0.396 Pl=0.471 K=0.353
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+Scenario: Slippery Road in Rain
+  Slippery road sign + rain = severe compound risk
+  DZ: 50, TSR: slippery_road (conf: 90%)
+  Results:
+    DZ-Only:       50.0
+    Weighted Avg:  50.0
+    DS Fusion:     92.8  UP (+42.8) OK
+    DS Details:  Bel=0.907 Pl=0.930 K=0.387
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+Scenario: Night Level Crossing
+  Unprotected level crossing at night
+  DZ: 55, TSR: level_crossing_without_barriers_ahead (conf: 87%)
+  Results:
+    DZ-Only:       55.0
+    Weighted Avg:  55.0
+    DS Fusion:     83.0  UP (+28.0) OK
+    DS Details:  Bel=0.785 Pl=0.839 K=0.292
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+Scenario: Motorway Info
+  Motorway information sign ΓåÆ minimal impact
+  DZ: 30, TSR: motorway (conf: 96%)
+  Results:
+    DZ-Only:       30.0
+    Weighted Avg:  20.2
+    DS Fusion:     25.3  DOWN (-4.7) OK
+    DS Details:  Bel=0.231 Pl=0.317 K=0.051
+
+================================================================================
+SUMMARY
+================================================================================
+Method                 Mean Score    Std Dev
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+dz_only                      42.1       18.9
+weighted_avg                 41.2       20.5
+ds_fusion                    58.5       30.8
+
+Results saved to evaluation/ablation_results.json
