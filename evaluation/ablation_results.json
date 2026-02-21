@@ -1,0 +1,44 @@
+{
+  "scenarios": [
+    "Curve in Rain",
+    "Safe Road + Parking",
+    "High Risk + Accident",
+    "Medium Risk + Speed Limit School",
+    "Low Risk + Stop Sign",
+    "Slippery Road in Rain",
+    "Night Level Crossing",
+    "Motorway Info"
+  ],
+  "results": {
+    "dz_only": [
+      42.0,
+      15.0,
+      75.0,
+      45.0,
+      25.0,
+      50.0,
+      55.0,
+      30.0
+    ],
+    "weighted_avg": [
+      41.3,
+      10.8,
+      76.75,
+      39.75,
+      35.5,
+      50.0,
+      55.0,
+      20.2
+    ],
+    "ds_fusion": [
+      70.7,
+      12.3,
+      92.3,
+      48.6,
+      42.8,
+      92.8,
+      83.0,
+      25.3
+    ]
+  }
+}
