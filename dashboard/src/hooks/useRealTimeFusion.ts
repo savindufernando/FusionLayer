@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { VehicleState, WeatherScenario, FusedPredictionResponse, AutoPredictRequest } from '../types';
 import { autoPredict } from '../services/api';
+import { useWebSocket } from './useWebSocket';
 
-const POLL_INTERVAL = 2000; // Send data to API every 2 seconds
+
 
 export interface TrailPoint {
     lat: number;
@@ -36,6 +37,7 @@ export interface RealTimeState {
     error: string | null;
     tickCount: number;
     lastUpdate: number | null;
+    isWebSocket: boolean;
 }
 
 /**
@@ -48,6 +50,9 @@ export function useRealTimeFusion(
     captureFrame: () => string | null,
     weather: WeatherScenario,
 ) {
+    // ─── WebSocket Integration ───────────────────────────────────
+    const { lastMessage, isConnected } = useWebSocket<FusedPredictionResponse>('/api/fusion/ws');
+
     const [state, setState] = useState<RealTimeState>({
         fusionResult: null,
         trail: [],
@@ -65,9 +70,10 @@ export function useRealTimeFusion(
         error: null,
         tickCount: 0,
         lastUpdate: null,
+        isWebSocket: false,
     });
 
-    const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const vehicleRef = useRef(vehicle);
     const weatherRef = useRef(weather);
     const captureRef = useRef(captureFrame);
@@ -76,15 +82,91 @@ export function useRealTimeFusion(
     weatherRef.current = weather;
     captureRef.current = captureFrame;
 
+    // Sync isWebSocket flag
+    useEffect(() => {
+        setState(prev => ({ ...prev, isWebSocket: isConnected }));
+    }, [isConnected]);
+
+    // Handle incoming WebSocket messages
+    useEffect(() => {
+        if (lastMessage && state.isRunning) {
+            updateStateWithResult(lastMessage, vehicleRef.current);
+        }
+    }, [lastMessage]);
+
+    const getDynamicInterval = useCallback((speed: number): number => {
+        if (speed > 70) return 400;   // Highway: ~2.5 scans/sec
+        if (speed > 30) return 800;   // City: ~1.2 scans/sec
+        return 1500;                  // Stationary/Slow: ~0.6 scans/sec
+    }, []);
+
+    const updateStateWithResult = useCallback((result: FusedPredictionResponse, v: VehicleState) => {
+        const newTrailPoint: TrailPoint = {
+            lat: v.lat,
+            lng: v.lng,
+            risk: result.fused_risk_score,
+            level: result.fused_risk_level,
+        };
+
+        setState(prev => {
+            // Calculate distance from last point
+            let dist = 0;
+            if (prev.fullHistory.length > 0) {
+                const last = prev.fullHistory[prev.fullHistory.length - 1];
+                dist = calcDistance(last.lat, last.lng, v.lat, v.lng);
+            }
+
+            const newMaxRisk = Math.max(prev.tripStats.maxRisk, result.fused_risk_score);
+            const newAvgRisk = ((prev.tripStats.avgRisk * prev.tripStats.riskSamples) + result.fused_risk_score) / (prev.tripStats.riskSamples + 1);
+
+            const newEvents = [...prev.tripStats.highRiskEvents];
+            if (result.fused_risk_level === 'HIGH' || result.fused_risk_score > 60) {
+                const lastEvent = newEvents.length > 0 ? newEvents[newEvents.length - 1] : null;
+                const timeSinceLast = lastEvent ? Date.now() - lastEvent.time : 99999;
+                if (timeSinceLast > 10000) {
+                    newEvents.push({
+                        time: Date.now(),
+                        lat: v.lat,
+                        lng: v.lng,
+                        risk: result.fused_risk_score,
+                        description: result.fusion_reasons[0]?.description || 'High Risk detected',
+                    });
+                }
+            }
+
+            return {
+                ...prev,
+                fusionResult: result,
+                trail: [...prev.trail.slice(-100), newTrailPoint],
+                fullHistory: [...prev.fullHistory, newTrailPoint],
+                tripStats: {
+                    ...prev.tripStats,
+                    distanceKm: prev.tripStats.distanceKm + dist,
+                    maxRisk: newMaxRisk,
+                    avgRisk: newAvgRisk,
+                    riskSamples: prev.tripStats.riskSamples + 1,
+                    highRiskEvents: newEvents,
+                },
+                error: null,
+                tickCount: prev.tickCount + 1,
+                lastUpdate: Date.now(),
+            };
+        });
+    }, []);
+
+    const isRunningRef = useRef(false);
+
     const tick = useCallback(async () => {
+        if (!isRunningRef.current) return;
+
         const v = vehicleRef.current;
+        if (v.lat === 0 && v.lng === 0) {
+            // Reschedule if no GPS yet
+            intervalRef.current = setTimeout(tick, 1000);
+            return;
+        }
 
-        // Don't send if no GPS position yet
-        if (v.lat === 0 && v.lng === 0) return;
-
-        // Capture camera frame
         const frame = captureRef.current();
-
         const request: AutoPredictRequest = {
             latitude: v.lat,
             longitude: v.lng,
@@ -95,93 +177,53 @@ export function useRealTimeFusion(
         };
 
         try {
+            console.log(`[Fusion] Tick ${state.tickCount + 1}: Requesting prediction...`);
             const result = await autoPredict(request);
+            console.log(`[Fusion] Result received:`, result);
 
-            const newTrailPoint: TrailPoint = {
-                lat: v.lat,
-                lng: v.lng,
-                risk: result.fused_risk_score,
-                level: result.fused_risk_level,
-            };
-
-            setState(prev => {
-                // Calculate distance from last point
-                let dist = 0;
-                if (prev.fullHistory.length > 0) {
-                    const last = prev.fullHistory[prev.fullHistory.length - 1];
-                    dist = calcDistance(last.lat, last.lng, v.lat, v.lng);
-                }
-
-                // Update basic stats
-                const newMaxRisk = Math.max(prev.tripStats.maxRisk, result.fused_risk_score);
-                const newAvgRisk = ((prev.tripStats.avgRisk * prev.tripStats.riskSamples) + result.fused_risk_score) / (prev.tripStats.riskSamples + 1);
-
-                // Track high risk events (cooldown 10s roughly checked by distance/time or simplified)
-                // specific logic: if high risk and far enough from last event
-                const newEvents = [...prev.tripStats.highRiskEvents];
-                if (result.fused_risk_level === 'HIGH' || result.fused_risk_score > 60) {
-                    const lastEvent = newEvents.length > 0 ? newEvents[newEvents.length - 1] : null;
-                    const timeSinceLast = lastEvent ? Date.now() - lastEvent.time : 99999;
-
-                    if (timeSinceLast > 10000) { // 10s cooldown to avoid spam
-                        newEvents.push({
-                            time: Date.now(),
-                            lat: v.lat,
-                            lng: v.lng,
-                            risk: result.fused_risk_score,
-                            description: result.fusion_reasons[0]?.description || 'High Risk detected',
-                        });
-                    }
-                }
-
-                return {
-                    ...prev,
-                    fusionResult: result,
-                    trail: [...prev.trail.slice(-100), newTrailPoint],
-                    fullHistory: [...prev.fullHistory, newTrailPoint],
-                    tripStats: {
-                        ...prev.tripStats,
-                        distanceKm: prev.tripStats.distanceKm + dist,
-                        maxRisk: newMaxRisk,
-                        avgRisk: newAvgRisk,
-                        riskSamples: prev.tripStats.riskSamples + 1,
-                        highRiskEvents: newEvents,
-                    },
-                    error: null,
-                    tickCount: prev.tickCount + 1,
-                    lastUpdate: Date.now(),
-                };
-            });
+            // Always update state from the direct response for immediate feedback
+            updateStateWithResult(result, v);
         } catch (err) {
+            console.error(`[Fusion] Loop error:`, err);
             setState(prev => ({
                 ...prev,
                 error: (err as Error).message,
                 tickCount: prev.tickCount + 1,
             }));
         }
-    }, []);
+
+        // Schedule next tick based on current speed
+        const nextInterval = getDynamicInterval(v.speed);
+        intervalRef.current = setTimeout(tick, nextInterval);
+    }, [isConnected, updateStateWithResult, getDynamicInterval, state.isRunning]);
 
     const start = useCallback(() => {
         if (intervalRef.current) return;
+        isRunningRef.current = true;
         setState(prev => ({
             ...prev,
             isRunning: true,
             error: null,
-            tripStats: { ...prev.tripStats, startTime: Date.now() } // Set start time
+            tripStats: { ...prev.tripStats, startTime: Date.now() }
         }));
-        tick();
-        intervalRef.current = setInterval(tick, POLL_INTERVAL);
+
+        // Use a timeout to kick off the loop instead of setInterval
+        const bootstrapTick = async () => {
+            await tick();
+        };
+        bootstrapTick();
     }, [tick]);
 
     const stop = useCallback(() => {
+        isRunningRef.current = false;
         if (intervalRef.current) {
-            clearInterval(intervalRef.current);
+            clearTimeout(intervalRef.current);
             intervalRef.current = null;
         }
         setState(prev => ({
             ...prev,
             isRunning: false,
-            tripStats: { ...prev.tripStats, endTime: Date.now() } // Set end time
+            tripStats: { ...prev.tripStats, endTime: Date.now() }
         }));
     }, []);
 
@@ -217,7 +259,7 @@ export function useRealTimeFusion(
 
     useEffect(() => {
         return () => {
-            if (intervalRef.current) clearInterval(intervalRef.current);
+            if (intervalRef.current) clearTimeout(intervalRef.current);
         };
     }, []);
 
