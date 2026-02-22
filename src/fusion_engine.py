@@ -16,6 +16,7 @@ Architecture:
 """
 
 import json
+import math
 import time
 import logging
 from dataclasses import dataclass, field, asdict
@@ -102,6 +103,9 @@ class FusionResult:
     fusion_reasons: List[Dict] = field(default_factory=list)
     active_signs: List[Dict] = field(default_factory=list)
     
+    # Adaptive weighting transparency
+    adaptive_weights: Dict = field(default_factory=dict)
+    
     # Metadata
     timestamp: str = ""
     fusion_method: str = "dempster_shafer"
@@ -163,6 +167,21 @@ class FusionEngine:
         self._conflict_log: List[Dict] = []
         self._max_conflict_log = 1000
         
+        # ─── Adaptive weighting config ────────────────────────────
+        self.adaptive_weighting = self.config.get("adaptive_weighting", True)
+        self.base_tsr_weight = self.config.get("tsr_weight", 0.35)
+        self.base_dz_weight = self.config.get("dz_weight", 0.65)
+        
+        # ─── Peak hour config (Colombo traffic patterns) ─────────
+        self.peak_hours = self.config.get("peak_hours", [
+            (7, 0, 9, 0),       # 7:00 AM – 9:00 AM
+            (16, 30, 19, 0),    # 4:30 PM – 7:00 PM
+        ])
+        
+        # ─── Segment history for learning ─────────────────────────
+        self._segment_history: Dict[str, Dict] = {}
+        self._segment_grid_precision = 3  # ~100 m grid
+        
         # Validate ontology on init
         errors = self.ontology.validate()
         if errors:
@@ -176,7 +195,7 @@ class FusionEngine:
             "tsr_weight": 0.35,
             "dz_weight": 0.65,
             "conflict_threshold": 0.3,
-            "sign_decay_lambda": 0.1,
+            "sign_decay_lambda": 0.05,
             "buffer_max_signs": 20,
             "buffer_max_age_seconds": 60,
             "min_tsr_confidence": 0.6,
@@ -229,7 +248,7 @@ class FusionEngine:
                            "Night" in dz_input.weather_condition
                 is_wet = dz_input.road_surface in ("Wet", "Snow", "Flood", "Ice")
                 is_fog = "Fog" in dz_input.weather_condition
-                is_peak = False  # Could be derived from timestamp
+                is_peak = self._is_peak_hour(now)
                 weather_code = self._weather_str_to_code(dz_input.weather_condition)
                 
                 # Compute context-adjusted risk modifier
@@ -278,6 +297,16 @@ class FusionEngine:
         # ─── Step 2: Get aggregate sign evidence from buffer ──────────
         aggregate = self.buffer.get_aggregate_evidence(now)
         
+        # ─── Adaptive weight computation ────────────────────────────
+        adaptive_w = self._compute_adaptive_weights(
+            dz_confidence=dz_input.confidence,
+            tsr_avg_confidence=(
+                aggregate.total_decay_weight / aggregate.num_active_signs
+                if aggregate.num_active_signs > 0 else 0
+            ),
+            num_signs=aggregate.num_active_signs
+        )
+        
         if aggregate.num_active_signs > 0:
             # Use weighted average modifier (accounts for decay)
             agg_modifier = aggregate.weighted_avg_modifier * aggregate.compound_factor
@@ -286,9 +315,13 @@ class FusionEngine:
             # Average decay weight as confidence proxy
             avg_decay = aggregate.total_decay_weight / aggregate.num_active_signs if aggregate.num_active_signs > 0 else 0
             
+            # Scale TSR evidence strength by adaptive weight ratio
+            weight_scale = adaptive_w["tsr"] / self.base_tsr_weight if self.adaptive_weighting else 1.0
+            scaled_confidence = min(avg_decay * weight_scale, 1.0)
+            
             tsr_mass = EvidenceConstructor.from_tsr(
                 sign_risk_modifier=agg_modifier,
-                tsr_confidence=min(avg_decay, 1.0),
+                tsr_confidence=scaled_confidence,
                 temporal_decay=1.0,  # Already in the weighted modifier
                 min_confidence=0.0   # We already filtered in buffer
             )
@@ -389,7 +422,15 @@ class FusionEngine:
             aggregate.num_active_signs
         )
         
-        # ─── Step 7: Build result ─────────────────────────────────────
+        # ─── Step 7: Update segment history ─────────────────────────────
+        self._update_segment_history(
+            dz_input.speed_kph,
+            getattr(tsr_input, 'latitude', 0) or 0,
+            getattr(tsr_input, 'longitude', 0) or 0,
+            smoothed_score, total_conflict, timestamp
+        )
+        
+        # ─── Step 8: Build result ─────────────────────────────────────
         return FusionResult(
             fused_risk_score=round(smoothed_score, 1),
             fused_risk_level=risk_level,
@@ -409,6 +450,7 @@ class FusionEngine:
                 "risk_modifier": round(d.risk_modifier, 3),
                 "age_seconds": round(now - d.timestamp, 1)
             } for d in self.buffer.get_active_detections(now)],
+            adaptive_weights=adaptive_w,
             timestamp=timestamp,
             fusion_method=self.config.get("fusion_method", "dempster_shafer")
         )
@@ -492,6 +534,178 @@ class FusionEngine:
         self.buffer.clear()
         self._ema_history.clear()
         self._conflict_log.clear()
+        # Note: segment history is NOT cleared — it persists across trips
+    
+    # ─── Adaptive Weighting ────────────────────────────────────────────
+    
+    def _compute_adaptive_weights(
+        self,
+        dz_confidence: float,
+        tsr_avg_confidence: float,
+        num_signs: int
+    ) -> Dict:
+        """
+        Compute adaptive evidence weights based on module confidence.
+        
+        When TSR has low confidence or no signs, reduce its influence.
+        When TSR has many high-confidence signs, boost its weight.
+        
+        Returns:
+            Dict with tsr, dz weights and reason string
+        """
+        if not self.adaptive_weighting:
+            return {
+                "tsr": round(self.base_tsr_weight, 3),
+                "dz": round(self.base_dz_weight, 3),
+                "mode": "fixed"
+            }
+        
+        tsr_w = self.base_tsr_weight
+        dz_w = self.base_dz_weight
+        reason = "baseline"
+        
+        # Factor 1: TSR confidence scaling
+        if num_signs == 0:
+            # No signs detected — TSR contributes nothing
+            tsr_w = 0.0
+            reason = "no_signs"
+        elif tsr_avg_confidence < 0.5:
+            # Low confidence — reduce TSR
+            tsr_w *= tsr_avg_confidence / 0.5  # linear scale down
+            reason = "low_tsr_confidence"
+        elif tsr_avg_confidence > 0.85 and num_signs >= 2:
+            # High confidence + multiple signs — boost TSR
+            boost = min(num_signs * 0.05, 0.15)
+            tsr_w = min(tsr_w + boost, 0.50)  # cap at 50%
+            reason = "high_tsr_confidence"
+        
+        # Factor 2: DZ confidence influence
+        if dz_confidence > 0.9:
+            # Very high DZ confidence — ensure it stays dominant
+            dz_w = max(dz_w, 0.60)
+            reason += "+strong_dz"
+        
+        # Normalise to sum to 1.0
+        total = tsr_w + dz_w
+        if total > 0:
+            tsr_w /= total
+            dz_w /= total
+        else:
+            dz_w = 1.0
+            tsr_w = 0.0
+        
+        return {
+            "tsr": round(tsr_w, 3),
+            "dz": round(dz_w, 3),
+            "mode": reason
+        }
+    
+    # ─── Time-of-Day Context ───────────────────────────────────────────
+    
+    def _is_peak_hour(self, timestamp: float) -> bool:
+        """
+        Check if the current time falls within configured peak hours.
+        
+        Default peak hours (Colombo traffic):
+          - Morning: 7:00 – 9:00
+          - Evening: 16:30 – 19:00
+        """
+        dt = datetime.fromtimestamp(timestamp)
+        current_minutes = dt.hour * 60 + dt.minute
+        
+        for start_h, start_m, end_h, end_m in self.peak_hours:
+            start = start_h * 60 + start_m
+            end = end_h * 60 + end_m
+            if start <= current_minutes <= end:
+                return True
+        return False
+    
+    # ─── Segment History / Historical Learning ─────────────────────────
+    
+    def _segment_key(self, lat: float, lon: float) -> str:
+        """Round lat/lon to grid cell (~100m precision)."""
+        p = self._segment_grid_precision
+        return f"{round(lat, p)},{round(lon, p)}"
+    
+    def _update_segment_history(
+        self,
+        speed: float,
+        lat: float,
+        lon: float,
+        risk_score: float,
+        conflict: float,
+        timestamp: str
+    ) -> None:
+        """
+        Update per-segment statistics for historical learning.
+        
+        Tracks average risk, conflict rate, and prediction count
+        per ~100m grid cell.  When a segment accumulates enough
+        predictions with consistently high conflict, it signals
+        potential calibration issues.
+        """
+        if lat == 0 and lon == 0:
+            return  # Skip unknown locations
+        
+        key = self._segment_key(lat, lon)
+        
+        if key not in self._segment_history:
+            self._segment_history[key] = {
+                "lat": lat,
+                "lon": lon,
+                "avg_risk": 0.0,
+                "max_risk": 0.0,
+                "conflict_sum": 0.0,
+                "high_conflict_count": 0,
+                "prediction_count": 0,
+                "last_seen": timestamp
+            }
+        
+        seg = self._segment_history[key]
+        n = seg["prediction_count"]
+        seg["avg_risk"] = (seg["avg_risk"] * n + risk_score) / (n + 1)
+        seg["max_risk"] = max(seg["max_risk"], risk_score)
+        seg["conflict_sum"] += conflict
+        if conflict > self.conflict_threshold:
+            seg["high_conflict_count"] += 1
+        seg["prediction_count"] = n + 1
+        seg["last_seen"] = timestamp
+        
+        # Warn about systematic calibration issues
+        if seg["prediction_count"] >= 10:
+            conflict_rate = seg["high_conflict_count"] / seg["prediction_count"]
+            if conflict_rate > 0.30:
+                logger.warning(
+                    f"Segment ({lat:.3f}, {lon:.3f}) has {conflict_rate:.0%} conflict rate "
+                    f"over {seg['prediction_count']} predictions — possible calibration issue"
+                )
+    
+    def get_segment_insights(self) -> List[Dict]:
+        """
+        Get accumulated segment-level insights.
+        
+        Returns segments with enough data (>5 predictions),
+        ordered by average risk score descending.
+        """
+        insights = []
+        for key, seg in self._segment_history.items():
+            if seg["prediction_count"] < 5:
+                continue
+            conflict_rate = seg["high_conflict_count"] / seg["prediction_count"]
+            insights.append({
+                "segment": key,
+                "lat": seg["lat"],
+                "lon": seg["lon"],
+                "avg_risk": round(seg["avg_risk"], 1),
+                "max_risk": round(seg["max_risk"], 1),
+                "conflict_rate": round(conflict_rate, 3),
+                "prediction_count": seg["prediction_count"],
+                "needs_calibration": conflict_rate > 0.30,
+                "last_seen": seg["last_seen"]
+            })
+        
+        insights.sort(key=lambda x: x["avg_risk"], reverse=True)
+        return insights
     
     @staticmethod
     def _weather_str_to_code(weather_str: str) -> int:
