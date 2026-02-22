@@ -224,6 +224,83 @@ def combine_multiple(mass_functions: List[MassFunction]) -> Tuple[MassFunction, 
     return result, conflicts
 
 
+# ─── Murphy's Modified Combination Rule ──────────────────────────────
+
+def murphy_combine(mass_functions: List[MassFunction]) -> Tuple[MassFunction, float]:
+    """
+    Combine multiple mass functions using Murphy's modified combination rule.
+    
+    Murphy's rule addresses the counter-intuitive behaviour of classical Dempster's
+    Rule under high conflict (the "Zadeh paradox") by:
+    
+    1. Computing the element-wise average of all input mass functions
+    2. Self-combining that average (n-1) times using Dempster's Rule
+    
+    This converges to a "consensus" among sources and is more robust when
+    evidence sources strongly disagree.
+    
+    Reference:
+        Murphy, C.K. (2000). Combining belief functions when evidence conflicts.
+        Decision Support Systems, 29(1), 1-9.
+    
+    Args:
+        mass_functions: List of mass functions to combine
+        
+    Returns:
+        Tuple of (combined MassFunction, final conflict measure)
+    """
+    if not mass_functions:
+        return MassFunction(source="murphy(empty)"), 0.0
+    
+    if len(mass_functions) == 1:
+        return mass_functions[0], 0.0
+    
+    n = len(mass_functions)
+    
+    # Step 1: Compute element-wise average
+    avg_safe = sum(m.m_safe for m in mass_functions) / n
+    avg_dangerous = sum(m.m_dangerous for m in mass_functions) / n
+    avg_uncertain = sum(m.m_uncertain for m in mass_functions) / n
+    
+    sources = [m.source for m in mass_functions]
+    avg_mass = MassFunction(
+        m_safe=avg_safe,
+        m_dangerous=avg_dangerous,
+        m_uncertain=avg_uncertain,
+        source=f"murphy_avg({'+'.join(sources)})"
+    )
+    
+    # Step 2: Self-combine (n-1) times using Dempster's Rule
+    result = avg_mass
+    final_K = 0.0
+    
+    for i in range(n - 1):
+        result, K = dempster_combine(result, avg_mass)
+        final_K = K  # Track the last conflict
+    
+    # Update source label
+    result.source = f"murphy({'+'.join(sources)})"
+    
+    return result, final_K
+
+
+def murphy_combine_multiple(mass_functions: List[MassFunction]) -> Tuple[MassFunction, List[float]]:
+    """
+    Murphy's combination rule with interface matching combine_multiple().
+    
+    Returns list of intermediate conflicts for compatibility with ablation
+    study code that expects the same return signature as combine_multiple().
+    
+    Args:
+        mass_functions: List of mass functions to combine
+        
+    Returns:
+        Tuple of (final combined MassFunction, list containing final conflict)
+    """
+    result, final_K = murphy_combine(mass_functions)
+    return result, [final_K] if final_K > 0 else []
+
+
 class EvidenceConstructor:
     """
     Converts raw module outputs into Dempster-Shafer mass functions.
