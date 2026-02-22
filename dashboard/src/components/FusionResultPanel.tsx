@@ -1,4 +1,5 @@
 import type { FusedPredictionResponse } from '../types';
+import { TriangleAlert } from 'lucide-react';
 
 interface Props {
     result: FusedPredictionResponse | null;
@@ -41,6 +42,27 @@ export default function FusionResultPanel({ result }: Props) {
                 <span className="method-badge">{result.fusion_method}</span>
             </div>
             <div className="fusion-content">
+                {result.adaptive_weights?.degraded && (
+                    <div className="degraded-warning" style={{
+                        background: 'rgba(245, 158, 11, 0.1)',
+                        border: '1px solid rgba(245, 158, 11, 0.3)',
+                        borderRadius: '6px',
+                        padding: '8px 12px',
+                        marginBottom: '1rem',
+                        color: '#f59e0b',
+                        fontSize: '13px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                    }}>
+                        <span><TriangleAlert size={14} /></span>
+                        <span>
+                            <strong>Partial Fusion:</strong> Some modules are unavailable.
+                            DZ: <em>{result.adaptive_weights.dz_circuit}</em> |
+                            TSR: <em>{result.adaptive_weights.tsr_circuit}</em>
+                        </span>
+                    </div>
+                )}
                 {/* Belief-Plausibility Bar */}
                 <div className="bp-section">
                     <div className="bp-labels">
