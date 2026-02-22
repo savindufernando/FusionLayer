@@ -1,0 +1,10 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0
+rootdir: D:\APIIT\FYP\FusionLayer
+plugins: anyio-4.12.1
+collected 72 items
+
+tests\test_fusion.py ................................................... [ 70%]
+.....................                                                    [100%]
+
+============================= 72 passed in 0.19s ==============================
