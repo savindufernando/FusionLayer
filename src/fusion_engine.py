@@ -31,6 +31,7 @@ from .evidence import (
 from .temporal_buffer import (
     TemporalSignBuffer, SignDetection, AggregateSignEvidence
 )
+from .logic_validator import LogicValidator, ValidationStatus
 
 
 logger = logging.getLogger(__name__)
@@ -99,9 +100,17 @@ class FusionResult:
     tsr_contribution: Dict = field(default_factory=dict)
     hotspot_contribution: Dict = field(default_factory=dict)
     
+    # Situational Reliability (SRD Novelty)
+    tsr_reliability: float = 1.0
+    tsr_discount_reasons: List[str] = field(default_factory=list)
+    
     # Explainability
     fusion_reasons: List[Dict] = field(default_factory=list)
     active_signs: List[Dict] = field(default_factory=list)
+    
+    # Neuro-Symbolic Validation (NSLV Novelty)
+    validation_status: str = "PLAUSIBLE"
+    validation_reason: str = ""
     
     # Adaptive weighting transparency
     adaptive_weights: Dict = field(default_factory=dict)
@@ -152,7 +161,11 @@ class FusionEngine:
         
         # Thresholds
         self.min_tsr_confidence = self.config.get("min_tsr_confidence", 0.6)
-        self.min_dz_confidence = self.config.get("min_dz_confidence", 0.3)
+        self.min_dz_confidence = self.config.get("min_dz_confidence", 0.4)
+        
+        # NSLV Novelty
+        self.validator = LogicValidator(self.config)
+        
         self.conflict_threshold = self.config.get("conflict_threshold", 0.3)
         
         # Risk level thresholds (on fused 0-100 scale)
@@ -234,6 +247,10 @@ class FusionEngine:
         now = current_time or time.time()
         timestamp = datetime.fromtimestamp(now).isoformat()
         reasons = []
+        tsr_reliability = 1.0
+        tsr_discount_reasons = []
+        v_status = "PLAUSIBLE"
+        v_reason = "No active sign evidence to validate"
         
         # ─── Step 1: Process TSR input through ontology ───────────────
         tsr_mass = MassFunction(source="tsr(absent)")
@@ -315,18 +332,65 @@ class FusionEngine:
             # Average decay weight as confidence proxy
             avg_decay = aggregate.total_decay_weight / aggregate.num_active_signs if aggregate.num_active_signs > 0 else 0
             
+            # ─── Situational Reliability Discounting (Novelty) ─────────
+            tsr_reliability, tsr_discount_reasons = self._compute_tsr_reliability(dz_input)
+            
             # Scale TSR evidence strength by adaptive weight ratio
             weight_scale = adaptive_w["tsr"] / self.base_tsr_weight if self.adaptive_weighting else 1.0
             scaled_confidence = min(avg_decay * weight_scale, 1.0)
             
+            # ─── Neuro-Symbolic Validation (Novelty) ───────────────────
+            # Validate the aggregate modifier (or primary sign if we had it)
+            # For simplicity, we'll validate against the 'reason' if available
+            primary_sign = aggregate.to_dict().get("primary_sign_name", "Unknown")
+            v_status, v_reason = self.validator.validate_detection(
+                class_name=primary_sign,
+                confidence=scaled_confidence,
+                speed_kph=dz_input.speed_kph,
+                road_type=dz_input.road_surface  # Using surface as proxy for road context for now
+            )
+            
+            # Adjust confidence/mass based on validation status
+            v_multiplier = self.validator.get_risk_adjustment(v_status)
+            scaled_confidence = min(scaled_confidence * v_multiplier, 1.0)
+            
             tsr_mass = EvidenceConstructor.from_tsr(
                 sign_risk_modifier=agg_modifier,
                 tsr_confidence=scaled_confidence,
-                temporal_decay=1.0,  # Already in the weighted modifier
-                min_confidence=0.0   # We already filtered in buffer
+                temporal_decay=1.0,
+                min_confidence=0.0,
+                reliability_discount=tsr_reliability
             )
             
+            tsr_contribution["validation"] = {
+                "status": v_status,
+                "reason": v_reason,
+                "multiplier": v_multiplier
+            }
+
+            if v_status in (ValidationStatus.CONTRADICTION, ValidationStatus.QUESTIONABLE):
+                reasons.append({
+                    "source": "fusion_nslv",
+                    "description": f"Symbolic logic flagged detection as {v_status}: {v_reason}",
+                    "impact": "decreases_confidence"
+                })
+            elif v_status == ValidationStatus.RULE_OVERRIDE:
+                 reasons.append({
+                    "source": "fusion_nslv",
+                    "description": f"RULE OVERRIDE: {v_reason}",
+                    "impact": "increases_risk"
+                })
+            
             tsr_contribution["aggregate"] = aggregate.to_dict()
+            tsr_contribution["reliability"] = tsr_reliability
+            tsr_contribution["reliability_reasons"] = tsr_discount_reasons
+
+            if tsr_reliability < 1.0:
+                reasons.append({
+                    "source": "fusion_srd",
+                    "description": f"Camera reliability discounted to {tsr_reliability*100:.0f}% due to environment",
+                    "impact": "uncertainty"
+                })
             
             if aggregate.num_active_signs > 1:
                 reasons.append({
@@ -422,6 +486,10 @@ class FusionEngine:
             aggregate.num_active_signs
         )
         
+        # Reliability already computed earlier in Step 2 if signs present
+        if aggregate.num_active_signs == 0:
+            tsr_reliability, tsr_discount_reasons = self._compute_tsr_reliability(dz_input)
+        
         # ─── Step 7: Update segment history ─────────────────────────────
         self._update_segment_history(
             dz_input.speed_kph,
@@ -443,6 +511,10 @@ class FusionEngine:
             dz_contribution=dz_contribution,
             tsr_contribution=tsr_contribution,
             hotspot_contribution=hotspot_contribution,
+            tsr_reliability=round(tsr_reliability, 3),
+            tsr_discount_reasons=tsr_discount_reasons,
+            validation_status=v_status,
+            validation_reason=v_reason,
             fusion_reasons=reasons,
             active_signs=[{
                 "class_name": d.class_name,
@@ -538,6 +610,44 @@ class FusionEngine:
     
     # ─── Adaptive Weighting ────────────────────────────────────────────
     
+    def _compute_tsr_reliability(self, dz_input: DZInput) -> Tuple[float, List[str]]:
+        """
+        Compute the situational reliability of the TSR sensor (SRD Novelty).
+        
+        TSR (Camera-based) performance degrades in specific environmental contexts.
+        Returns a discount factor [0, 1] and a list of reasons.
+        """
+        reliability = 1.0
+        reasons = []
+        
+        weather = dz_input.weather_condition.lower()
+        surface = dz_input.road_surface.lower()
+        
+        # 1. Light Conditions
+        if "night" in weather or "dark" in weather:
+            reliability *= 0.7
+            reasons.append("Reduced visibility at night (-30%)")
+        
+        # 2. Precipitation
+        if "heavy rain" in weather or "storm" in weather:
+            reliability *= 0.6
+            reasons.append("Heavy rain blurring lens/obstructing view (-40%)")
+        elif "rain" in weather:
+            reliability *= 0.85
+            reasons.append("Light rain / mist (-15%)")
+            
+        # 3. Fog/Vapor
+        if "fog" in weather or "mist" in weather:
+            reliability *= 0.65
+            reasons.append("Fog/Haze reducing structural contrast (-35%)")
+            
+        # 4. Surface Spray (if fast on wet road)
+        if surface == "wet" and dz_input.speed_kph > 60:
+            reliability *= 0.9
+            reasons.append("Road spray from preceding vehicles (-10%)")
+            
+        return max(0.1, reliability), reasons
+        
     def _compute_adaptive_weights(
         self,
         dz_confidence: float,

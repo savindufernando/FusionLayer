@@ -139,6 +139,14 @@ class FusedPredictionResponse(BaseModel):
     tsr_contribution: Dict
     hotspot_contribution: Dict
     
+    # Situational Reliability (SRD Novelty)
+    tsr_reliability: float = Field(default=1.0, ge=0.1, le=1.0)
+    tsr_discount_reasons: List[str] = []
+    
+    # Neuro-Symbolic Validation (NSLV Novelty)
+    validation_status: str = "PLAUSIBLE"
+    validation_reason: str = ""
+    
     # Explainability
     fusion_reasons: List[FusionReasonResponse]
     active_signs: List[ActiveSignResponse]

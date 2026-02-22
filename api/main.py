@@ -460,6 +460,10 @@ def _result_to_response(result) -> FusedPredictionResponse:
         dz_contribution=result.dz_contribution,
         tsr_contribution=result.tsr_contribution,
         hotspot_contribution=result.hotspot_contribution,
+        tsr_reliability=result.tsr_reliability,
+        tsr_discount_reasons=result.tsr_discount_reasons,
+        validation_status=result.validation_status,
+        validation_reason=result.validation_reason,
         fusion_reasons=[
             FusionReasonResponse(**r) for r in result.fusion_reasons
         ],

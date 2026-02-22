@@ -228,7 +228,7 @@ body {
 
 .systems-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, 1fr);
   gap: 20px;
 }
 
@@ -273,11 +273,14 @@ body {
 /* ─── Map ───────────────────────────────────────────────────────── */
 .map-card {
   flex: 1;
-  min-height: 380px;
+  min-height: 400px;
+  display: flex;
+  flex-direction: column;
 }
 
 .map-container {
-  height: 340px;
+  flex: 1;
+  min-height: 300px;
   width: 100%;
   background: var(--bg-tertiary);
   transition: filter var(--transition);
@@ -1095,34 +1098,21 @@ body {
   .dashboard {
     grid-template-columns: 1fr;
   }
+}
+
+@media (max-width: 1024px) {
+  .dashboard {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 16px;
+  }
 
   .map-container {
     height: 300px;
   }
-}
 
-@media (max-width: 768px) {
-
-  .top-row,
   .systems-row {
     grid-template-columns: 1fr;
-  }
-
-  .header {
-    padding: 10px 16px;
-  }
-
-  .dashboard {
-    padding: 12px 16px;
-    gap: 12px;
-  }
-
-  .ds-metrics-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .telemetry-grid {
-    grid-template-columns: repeat(2, 1fr);
   }
 }
 
@@ -2076,6 +2066,143 @@ body {
 
   .map-container {
     height: 300px;
+  }
+
+  .systems-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ─── Sensor Reliability (Novelty) ─── */
+.system-reliability {
+  grid-column: span 2;
+}
+
+.system-reliability .reliability-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.reliability-gauge-container {
+  height: 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+
+.reliability-gauge-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  transition: width 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275), background-color 0.4s;
+}
+
+.reliability-metadata {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.reliability-info-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.reliability-reasons-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.reliability-reasons-list li {
+  margin-bottom: 0.25rem;
+}
+
+.reliability-alert {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 4px;
+  color: var(--status-high-risk);
+  font-size: 0.75rem;
+}
+
+.icon-success {
+  color: var(--status-online);
+}
+
+@media (max-width: 1024px) {
+  .system-reliability {
+    grid-column: span 1;
+  }
+}
+
+/* ─── Validation Tags ─── */
+.status-tag {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: 1px solid transparent;
+}
+
+.status-tag.confirmed {
+  background: rgba(34, 197, 94, 0.1);
+  color: #4ade80;
+  border-color: rgba(74, 222, 128, 0.2);
+}
+
+.status-tag.plausible {
+  background: rgba(59, 130, 246, 0.1);
+  color: #60a5fa;
+  border-color: rgba(96, 165, 250, 0.2);
+}
+
+.status-tag.questionable {
+  background: rgba(245, 158, 11, 0.1);
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.2);
+}
+
+.status-tag.contradiction {
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.2);
+}
+
+.status-tag.rule_override {
+  background: rgba(168, 85, 247, 0.1);
+  color: #c084fc;
+  border-color: rgba(192, 132, 252, 0.2);
+  animation: pulse-purple 2s infinite;
+}
+
+@keyframes pulse-purple {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.4);
+  }
+
+  70% {
+    transform: scale(1.02);
+    box-shadow: 0 0 0 10px rgba(168, 85, 247, 0);
+  }
+
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(168, 85, 247, 0);
   }
 }
 

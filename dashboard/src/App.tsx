@@ -7,6 +7,7 @@ import RiskGauge from './components/RiskGauge';
 import VehicleTelemetry from './components/VehicleTelemetry';
 import SystemGeolocation from './components/SystemGeolocation';
 import SystemSignDetection from './components/SystemSignDetection';
+import SensorReliability from './components/SensorReliability';
 import FusionResultPanel from './components/FusionResultPanel';
 import Controls from './components/Controls';
 import HotspotPanel from './components/HotspotPanel';
@@ -258,6 +259,7 @@ function App() {
               result={fusion.state.fusionResult}
               currentSign={null}
             />
+            <SensorReliability result={fusion.state.fusionResult} />
           </div>
 
           <FusionResultPanel result={fusion.state.fusionResult} />

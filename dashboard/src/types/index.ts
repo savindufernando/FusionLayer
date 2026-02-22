@@ -71,6 +71,10 @@ export interface FusedPredictionResponse {
     };
     fusion_reasons: FusionReason[];
     active_signs: ActiveSign[];
+    tsr_reliability: number;
+    tsr_discount_reasons: string[];
+    validation_status: string;
+    validation_reason: string;
     timestamp: string;
     fusion_method: string;
     adaptive_weights: {

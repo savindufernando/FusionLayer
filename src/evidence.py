@@ -238,24 +238,23 @@ class EvidenceConstructor:
         sign_risk_modifier: float,
         tsr_confidence: float,
         temporal_decay: float = 1.0,
-        min_confidence: float = 0.5
+        min_confidence: float = 0.5,
+        reliability_discount: float = 1.0
     ) -> MassFunction:
         """
         Construct mass function from TSR module output.
         
         The sign risk modifier (from ontology) determines the direction of evidence,
         while TSR confidence and temporal decay determine the strength.
-        
-        For hazard signs (modifier > 0):
-            m({DANGEROUS}) = modifier × confidence × decay
-            m({SAFE}) = (1 - modifier) × confidence × decay × 0.5
-            m({Θ}) = 1 - m(D) - m(S)
+        The reliability_discount (SRD Novelty) shifts mass to uncertainty based
+        on environmental context.
         
         Args:
             sign_risk_modifier: From SignRiskOntology [0, 1]
             tsr_confidence: Model prediction confidence [0, 1]
             temporal_decay: Time decay factor [0, 1]
             min_confidence: Minimum TSR confidence to form evidence
+            reliability_discount: Situational reliability [0, 1] (1.0 = full trust)
             
         Returns:
             MassFunction representing TSR evidence
@@ -264,7 +263,7 @@ class EvidenceConstructor:
         if tsr_confidence < min_confidence:
             return MassFunction(source="tsr(low_conf)")
         
-        # Effective evidence strength
+        # Effective evidence strength before situational discounting
         strength = tsr_confidence * temporal_decay
         
         # High modifier → evidence of danger
@@ -273,20 +272,21 @@ class EvidenceConstructor:
             # Hazard/regulatory sign → evidence of danger
             m_dangerous = sign_risk_modifier * strength
             m_safe = (1.0 - sign_risk_modifier) * strength * 0.3  # Slight counter-evidence
-            m_uncertain = 1.0 - m_dangerous - m_safe
         elif sign_risk_modifier < 0.05:
             # Purely informational sign → weak evidence of safety
             m_safe = (1.0 - sign_risk_modifier) * strength * 0.2
             m_dangerous = 0.0
-            m_uncertain = 1.0 - m_safe
         else:
             # Mild sign → mostly ignorance
             m_dangerous = sign_risk_modifier * strength * 0.5
             m_safe = (1.0 - sign_risk_modifier) * strength * 0.2
-            m_uncertain = 1.0 - m_dangerous - m_safe
-        
-        # Ensure non-negative
-        m_uncertain = max(0.0, m_uncertain)
+            
+        # ─── Situational Reliability Discounting (Novelty) ─────────────
+        # Traditional DS Discounting: m'(A) = alpha * m(A), m'(Theta) = (1-alpha) + alpha * m(Theta)
+        alpha = reliability_discount
+        m_safe *= alpha
+        m_dangerous *= alpha
+        m_uncertain = 1.0 - m_safe - m_dangerous
         
         return MassFunction(
             m_safe=m_safe,
