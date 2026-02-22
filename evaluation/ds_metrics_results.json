@@ -1,0 +1,200 @@
+{
+  "scenario_metrics": [
+    {
+      "scenario": "Curve in Rain",
+      "fused_score": 66.9,
+      "fused_level": "HIGH",
+      "nonspecificity": 0.05806,
+      "strife": 0.856462,
+      "total_uncertainty": 0.914522,
+      "belief_interval_width": 0.05806,
+      "pignistic_entropy": 0.909254
+    },
+    {
+      "scenario": "Safe + Parking",
+      "fused_score": 12.2,
+      "fused_level": "LOW",
+      "nonspecificity": 0.080287,
+      "strife": 0.48092,
+      "total_uncertainty": 0.561207,
+      "belief_interval_width": 0.080287,
+      "pignistic_entropy": 0.522902
+    },
+    {
+      "scenario": "High Risk + Accident",
+      "fused_score": 93.3,
+      "fused_level": "HIGH",
+      "nonspecificity": 0.014591,
+      "strife": 0.324641,
+      "total_uncertainty": 0.339232,
+      "belief_interval_width": 0.014591,
+      "pignistic_entropy": 0.329448
+    },
+    {
+      "scenario": "School Zone",
+      "fused_score": 49.0,
+      "fused_level": "MEDIUM",
+      "nonspecificity": 0.096503,
+      "strife": 0.903221,
+      "total_uncertainty": 0.999724,
+      "belief_interval_width": 0.096503,
+      "pignistic_entropy": 0.999695
+    },
+    {
+      "scenario": "Slippery in Rain",
+      "fused_score": 88.9,
+      "fused_level": "HIGH",
+      "nonspecificity": 0.03528,
+      "strife": 0.446118,
+      "total_uncertainty": 0.481398,
+      "belief_interval_width": 0.03528,
+      "pignistic_entropy": 0.462432
+    },
+    {
+      "scenario": "Night Level Crossing",
+      "fused_score": 75.4,
+      "fused_level": "HIGH",
+      "nonspecificity": 0.086974,
+      "strife": 0.707625,
+      "total_uncertainty": 0.794599,
+      "belief_interval_width": 0.086974,
+      "pignistic_entropy": 0.775032
+    },
+    {
+      "scenario": "DZ-only High",
+      "fused_score": 80.0,
+      "fused_level": "HIGH",
+      "nonspecificity": 0.050761,
+      "strife": 0.6602,
+      "total_uncertainty": 0.710961,
+      "belief_interval_width": 0.050761,
+      "pignistic_entropy": 0.695505
+    },
+    {
+      "scenario": "DZ-only Low",
+      "fused_score": 10.0,
+      "fused_level": "LOW",
+      "nonspecificity": 0.077519,
+      "strife": 0.422726,
+      "total_uncertainty": 0.500245,
+      "belief_interval_width": 0.077519,
+      "pignistic_entropy": 0.458249
+    }
+  ],
+  "dempster_vs_murphy": [
+    {
+      "scenario": "Curve in Rain",
+      "ds_metrics": {
+        "nonspecificity": 0.073202,
+        "strife": 0.926547,
+        "total_uncertainty": 0.999749,
+        "belief_interval_width": 0.073202,
+        "pignistic_entropy": 0.999729
+      },
+      "murphy_metrics": {
+        "nonspecificity": 0.110627,
+        "strife": 0.886746,
+        "total_uncertainty": 0.997372,
+        "belief_interval_width": 0.110627,
+        "pignistic_entropy": 0.997045
+      },
+      "ds_conflict": 0.25444672,
+      "murphy_conflict": 0.25335488000000006
+    },
+    {
+      "scenario": "Safe + Parking",
+      "ds_metrics": {
+        "nonspecificity": 0.083651,
+        "strife": 0.493544,
+        "total_uncertainty": 0.577195,
+        "belief_interval_width": 0.083651,
+        "pignistic_entropy": 0.538598
+      },
+      "murphy_metrics": {
+        "nonspecificity": 0.223979,
+        "strife": 0.342261,
+        "total_uncertainty": 0.56624,
+        "belief_interval_width": 0.223979,
+        "pignistic_entropy": 0.441046
+      },
+      "ds_conflict": 0.024880500000000003,
+      "murphy_conflict": 0.06407775
+    },
+    {
+      "scenario": "High Risk + Accident",
+      "ds_metrics": {
+        "nonspecificity": 0.018629,
+        "strife": 0.385935,
+        "total_uncertainty": 0.404564,
+        "belief_interval_width": 0.018629,
+        "pignistic_entropy": 0.393261
+      },
+      "murphy_metrics": {
+        "nonspecificity": 0.021836,
+        "strife": 0.376996,
+        "total_uncertainty": 0.398832,
+        "belief_interval_width": 0.021836,
+        "pignistic_entropy": 0.385412
+      },
+      "ds_conflict": 0.21413,
+      "murphy_conflict": 0.208075
+    },
+    {
+      "scenario": "School Zone",
+      "ds_metrics": {
+        "nonspecificity": 0.102594,
+        "strife": 0.896891,
+        "total_uncertainty": 0.999486,
+        "belief_interval_width": 0.102594,
+        "pignistic_entropy": 0.999427
+      },
+      "murphy_metrics": {
+        "nonspecificity": 0.155764,
+        "strife": 0.844215,
+        "total_uncertainty": 0.999979,
+        "belief_interval_width": 0.155764,
+        "pignistic_entropy": 0.999975
+      },
+      "ds_conflict": 0.194106,
+      "murphy_conflict": 0.21085597500000003
+    },
+    {
+      "scenario": "Slippery in Rain",
+      "ds_metrics": {
+        "nonspecificity": 0.077627,
+        "strife": 0.876844,
+        "total_uncertainty": 0.954471,
+        "belief_interval_width": 0.077627,
+        "pignistic_entropy": 0.950639
+      },
+      "murphy_metrics": {
+        "nonspecificity": 0.102484,
+        "strife": 0.839,
+        "total_uncertainty": 0.941484,
+        "belief_interval_width": 0.102484,
+        "pignistic_entropy": 0.934802
+      },
+      "ds_conflict": 0.25155,
+      "murphy_conflict": 0.2486
+    },
+    {
+      "scenario": "Night Level Crossing",
+      "ds_metrics": {
+        "nonspecificity": 0.084522,
+        "strife": 0.815939,
+        "total_uncertainty": 0.900461,
+        "belief_interval_width": 0.084522,
+        "pignistic_entropy": 0.891271
+      },
+      "murphy_metrics": {
+        "nonspecificity": 0.103698,
+        "strife": 0.781528,
+        "total_uncertainty": 0.885226,
+        "belief_interval_width": 0.103698,
+        "pignistic_entropy": 0.871947
+      },
+      "ds_conflict": 0.23513489999999998,
+      "murphy_conflict": 0.23298536250000002
+    }
+  ]
+}
