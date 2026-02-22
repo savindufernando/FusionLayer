@@ -35,6 +35,30 @@
   --radius-lg: 16px;
 
   --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --surface-card: #ffffff;
+}
+
+/* ─── Dark Theme Overrides ───────────────────────────────────────── */
+[data-theme='dark'] {
+  --bg-primary: #0f172a;
+  --bg-secondary: #0f172a;
+  --bg-tertiary: #1e293b;
+  --surface-card: #1e293b;
+  --border-color: #334155;
+  --border-focus: #6366f1;
+
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-tertiary: #94a3b8;
+  --text-accent: #818cf8;
+
+  --accent-primary: #6366f1;
+  --accent-secondary: #22d3ee;
+  --accent-gradient: linear-gradient(135deg, #6366f1, #22d3ee);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.7);
 }
 
 /* ─── Reset & Base ──────────────────────────────────────────────── */
@@ -53,6 +77,7 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+  transition: background var(--transition), color var(--transition);
 }
 
 /* ─── App Layout ────────────────────────────────────────────────── */
@@ -255,6 +280,11 @@ body {
   height: 340px;
   width: 100%;
   background: var(--bg-tertiary);
+  transition: filter var(--transition);
+}
+
+[data-theme='dark'] .map-container {
+  filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 }
 
 .coord-badge {
@@ -1609,10 +1639,10 @@ body {
   font-weight: 600;
   color: var(--text-primary);
   margin-right: 1.5rem;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--bg-tertiary);
   padding: 0.35rem 0.85rem;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--border-color);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
@@ -1672,7 +1702,7 @@ body {
 }
 
 .stat-box {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-primary);
   border-radius: 12px;
   padding: 1rem;
   text-align: center;
@@ -1681,7 +1711,7 @@ body {
 }
 
 .stat-box:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--bg-tertiary);
 }
 
 .stat-label {
@@ -1930,4 +1960,247 @@ body {
 
 .btn-close:hover {
   color: var(--text-primary);
+}
+
+/* ===================================================================
+   Dark Theme
+   =================================================================== */
+
+[data-theme="dark"] {
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-tertiary: #334155;
+  --border-color: #475569;
+  --border-focus: #818cf8;
+
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #64748b;
+  --text-accent: #818cf8;
+  --text-muted: #64748b;
+
+  --accent-primary: #818cf8;
+  --accent-secondary: #22d3ee;
+  --accent-gradient: linear-gradient(135deg, #818cf8, #22d3ee);
+
+  --risk-low: #4ade80;
+  --risk-medium: #facc15;
+  --risk-high: #f87171;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] .logo-icon {
+  background: linear-gradient(135deg, rgba(129, 140, 248, 0.15), rgba(34, 211, 238, 0.15));
+}
+
+[data-theme="dark"] .detected-sign {
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.08), rgba(129, 140, 248, 0.08));
+  border-color: rgba(34, 211, 238, 0.2);
+}
+
+[data-theme="dark"] .method-badge {
+  background: rgba(129, 140, 248, 0.12);
+  color: var(--accent-primary);
+  border-color: rgba(129, 140, 248, 0.2);
+}
+
+[data-theme="dark"] .bp-bar-track {
+  background: #334155;
+}
+
+[data-theme="dark"] .trip-table th {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="dark"] .stat-box {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="dark"] .stat-box:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Theme toggle button */
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition);
+  font-size: 16px;
+}
+
+.theme-toggle:hover {
+  background: var(--accent-primary);
+  color: #fff;
+  border-color: var(--accent-primary);
+}
+
+/* Keyboard shortcut hints */
+.kbd-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-tertiary);
+  margin-left: 6px;
+}
+
+/* ===================================================================
+   Responsive — Tablet (≤1024px)
+   =================================================================== */
+
+@media (max-width: 1024px) {
+  .dashboard {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 16px;
+  }
+
+  .map-container {
+    height: 300px;
+  }
+}
+
+/* ===================================================================
+   Responsive — Mobile (≤768px)
+   =================================================================== */
+
+@media (max-width: 768px) {
+  .header {
+    padding: 10px 16px;
+  }
+
+  .logo-title {
+    font-size: 15px;
+  }
+
+  .logo-subtitle {
+    font-size: 9px;
+  }
+
+  .dashboard {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .top-row,
+  .systems-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .map-container {
+    height: 260px;
+  }
+
+  .telemetry-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    padding: 10px 12px;
+  }
+
+  .ds-metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .controls-row {
+    flex-wrap: wrap;
+  }
+
+  .weather-pills {
+    flex-wrap: wrap;
+  }
+
+  .stats-dashboard {
+    grid-template-columns: 1fr;
+  }
+
+  .history-overlay .history-modal {
+    width: 95vw;
+    height: 90vh;
+    border-radius: 12px;
+  }
+}
+
+/* ===================================================================
+   Responsive — Small Mobile (≤480px)
+   =================================================================== */
+
+@media (max-width: 480px) {
+  .header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .header-right {
+    width: 100%;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .header-time {
+    font-size: 11px;
+  }
+
+  .dashboard {
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .card-header {
+    padding: 10px 14px;
+  }
+
+  .card-title {
+    font-size: 11px;
+  }
+
+  .gauge-svg {
+    width: 140px;
+  }
+
+  .gauge-value {
+    font-size: 28px;
+  }
+
+  .telemetry-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .btn {
+    font-size: 12px;
+    padding: 8px 12px;
+  }
+
+  .weather-pill {
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+
+  .map-container {
+    height: 220px;
+  }
+
+  .system-metrics {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
