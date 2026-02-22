@@ -1,3 +1,5 @@
+import { Cloud, Sun, CloudRain, CloudFog, Moon, CloudLightning, TrafficCone } from 'lucide-react';
+
 interface TelemetryProps {
     speed: number;
     heading: number;
@@ -56,13 +58,13 @@ export default function VehicleTelemetry({ speed, heading, lat, lng, accuracy, i
                     <div className="telemetry-label">GPS Accuracy</div>
                 </div>
                 <div className="telemetry-item telemetry-weather">
-                    {weather === 'realtime' && '☁️'}
-                    {weather === 'sunny' && '☀️'}
-                    {weather === 'rain' && '🌧️'}
-                    {weather === 'fog' && '🌫️'}
-                    {weather === 'night' && '🌙'}
-                    {weather === 'storm' && '⛈️'}
-                    {weather === 'peak' && '🚦'}
+                    {weather === 'realtime' && <Cloud size={22} />}
+                    {weather === 'sunny' && <Sun size={22} />}
+                    {weather === 'rain' && <CloudRain size={22} />}
+                    {weather === 'fog' && <CloudFog size={22} />}
+                    {weather === 'night' && <Moon size={22} />}
+                    {weather === 'storm' && <CloudLightning size={22} />}
+                    {weather === 'peak' && <TrafficCone size={22} />}
                     <div className="telemetry-unit">&nbsp;</div>
                     <div className="telemetry-label">{weather}</div>
                 </div>
