@@ -1,0 +1,170 @@
+[
+  {
+    "scenario": "Curve + Rain + Hotspot",
+    "description": "Dangerous curve on wet road near known accident hotspot",
+    "full_fusion": {
+      "score": 71.4,
+      "level": "HIGH",
+      "conflict": 0.3388
+    },
+    "without_tsr": {
+      "score": 48.3,
+      "level": "MEDIUM",
+      "delta": 23.1
+    },
+    "without_hotspot": {
+      "score": 66.9,
+      "level": "HIGH",
+      "delta": 4.5
+    },
+    "dz_only": {
+      "score": 42.0,
+      "level": "MEDIUM"
+    }
+  },
+  {
+    "scenario": "Accident Sign + High DZ",
+    "description": "Accident warning sign in a high-risk zone",
+    "full_fusion": {
+      "score": 93.3,
+      "level": "HIGH",
+      "conflict": 0.2254
+    },
+    "without_tsr": {
+      "score": 75.0,
+      "level": "HIGH",
+      "delta": 18.3
+    },
+    "without_hotspot": null,
+    "dz_only": {
+      "score": 75.0,
+      "level": "HIGH"
+    }
+  },
+  {
+    "scenario": "School Zone + Hotspot",
+    "description": "School zone speed limit near accident hotspot",
+    "full_fusion": {
+      "score": 52.2,
+      "level": "MEDIUM",
+      "conflict": 0.2135
+    },
+    "without_tsr": {
+      "score": 48.6,
+      "level": "MEDIUM",
+      "delta": 3.6
+    },
+    "without_hotspot": {
+      "score": 49.0,
+      "level": "MEDIUM",
+      "delta": 3.2
+    },
+    "dz_only": {
+      "score": 45.0,
+      "level": "MEDIUM"
+    }
+  },
+  {
+    "scenario": "Slippery Road + Rain",
+    "description": "Slippery road sign during rainstorm",
+    "full_fusion": {
+      "score": 88.9,
+      "level": "HIGH",
+      "conflict": 0.3618
+    },
+    "without_tsr": {
+      "score": 50.0,
+      "level": "MEDIUM",
+      "delta": 38.9
+    },
+    "without_hotspot": null,
+    "dz_only": {
+      "score": 50.0,
+      "level": "MEDIUM"
+    }
+  },
+  {
+    "scenario": "Night Level Crossing",
+    "description": "Unprotected level crossing at night",
+    "full_fusion": {
+      "score": 76.3,
+      "level": "HIGH",
+      "conflict": 0.2252
+    },
+    "without_tsr": {
+      "score": 56.5,
+      "level": "MEDIUM",
+      "delta": 19.8
+    },
+    "without_hotspot": {
+      "score": 75.4,
+      "level": "HIGH",
+      "delta": 0.9
+    },
+    "dz_only": {
+      "score": 55.0,
+      "level": "MEDIUM"
+    }
+  },
+  {
+    "scenario": "Safe Road + Parking",
+    "description": "Informational parking sign on safe road (low impact expected)",
+    "full_fusion": {
+      "score": 12.2,
+      "level": "LOW",
+      "conflict": 0.0262
+    },
+    "without_tsr": {
+      "score": 15.0,
+      "level": "LOW",
+      "delta": -2.8
+    },
+    "without_hotspot": null,
+    "dz_only": {
+      "score": 15.0,
+      "level": "LOW"
+    }
+  },
+  {
+    "scenario": "Stop Sign + Medium Risk",
+    "description": "Stop sign at intersection with moderate zone risk",
+    "full_fusion": {
+      "score": 62.4,
+      "level": "MEDIUM",
+      "conflict": 0.3341
+    },
+    "without_tsr": {
+      "score": 43.5,
+      "level": "MEDIUM",
+      "delta": 18.9
+    },
+    "without_hotspot": {
+      "score": 59.6,
+      "level": "MEDIUM",
+      "delta": 2.8
+    },
+    "dz_only": {
+      "score": 40.0,
+      "level": "MEDIUM"
+    }
+  },
+  {
+    "scenario": "Motorway + High Speed",
+    "description": "Motorway info sign at high speed (minimal sign impact expected)",
+    "full_fusion": {
+      "score": 25.0,
+      "level": "LOW",
+      "conflict": 0.0529
+    },
+    "without_tsr": {
+      "score": 30.0,
+      "level": "LOW",
+      "delta": -5.0
+    },
+    "without_hotspot": null,
+    "dz_only": {
+      "score": 30.0,
+      "level": "LOW"
+    }
+  }
+]
