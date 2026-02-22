@@ -10,7 +10,7 @@
     "Motorway Info"
   ],
   "results": {
-    "dz_only": [
+    "DZ-Only": [
       42.0,
       15.0,
       75.0,
@@ -20,7 +20,7 @@
       55.0,
       30.0
     ],
-    "weighted_avg": [
+    "Weighted Avg": [
       41.3,
       10.8,
       76.75,
@@ -30,15 +30,145 @@
       55.0,
       20.2
     ],
-    "ds_fusion": [
-      70.7,
-      12.3,
-      92.3,
-      48.6,
+    "DS Fusion (full)": [
+      66.9,
+      12.2,
+      93.3,
+      49.0,
+      45.5,
+      88.9,
+      75.4,
+      25.0
+    ],
+    "Murphy's Rule": [
+      53.2,
+      9.14,
+      92.47,
+      49.71,
+      47.27,
+      64.92,
+      70.75,
+      20.73
+    ],
+    "DS (no temp buffer)": [
+      50.97,
+      12.32,
+      92.25,
+      48.59,
       42.8,
-      92.8,
-      83.0,
-      25.3
+      63.0,
+      69.16,
+      25.25
+    ],
+    "DS (no adaptive wt)": [
+      50.97,
+      12.32,
+      92.25,
+      48.59,
+      42.8,
+      63.0,
+      69.16,
+      25.25
+    ],
+    "DS (no context rules)": [
+      50.97,
+      12.32,
+      92.25,
+      48.59,
+      42.8,
+      63.0,
+      69.16,
+      25.25
     ]
-  }
+  },
+  "scenario_details": [
+    {
+      "scenario": "Curve in Rain",
+      "expected": "increase",
+      "DZ-Only": 42.0,
+      "Weighted Avg": 41.3,
+      "DS Fusion (full)": 66.9,
+      "Murphy's Rule": 53.2,
+      "DS (no temp buffer)": 51.0,
+      "DS (no adaptive wt)": 51.0,
+      "DS (no context rules)": 51.0
+    },
+    {
+      "scenario": "Safe Road + Parking",
+      "expected": "maintain",
+      "DZ-Only": 15.0,
+      "Weighted Avg": 10.8,
+      "DS Fusion (full)": 12.2,
+      "Murphy's Rule": 9.1,
+      "DS (no temp buffer)": 12.3,
+      "DS (no adaptive wt)": 12.3,
+      "DS (no context rules)": 12.3
+    },
+    {
+      "scenario": "High Risk + Accident",
+      "expected": "increase",
+      "DZ-Only": 75.0,
+      "Weighted Avg": 76.8,
+      "DS Fusion (full)": 93.3,
+      "Murphy's Rule": 92.5,
+      "DS (no temp buffer)": 92.3,
+      "DS (no adaptive wt)": 92.3,
+      "DS (no context rules)": 92.3
+    },
+    {
+      "scenario": "Medium Risk + Speed Limit School",
+      "expected": "increase",
+      "DZ-Only": 45.0,
+      "Weighted Avg": 39.8,
+      "DS Fusion (full)": 49.0,
+      "Murphy's Rule": 49.7,
+      "DS (no temp buffer)": 48.6,
+      "DS (no adaptive wt)": 48.6,
+      "DS (no context rules)": 48.6
+    },
+    {
+      "scenario": "Low Risk + Stop Sign",
+      "expected": "increase",
+      "DZ-Only": 25.0,
+      "Weighted Avg": 35.5,
+      "DS Fusion (full)": 45.5,
+      "Murphy's Rule": 47.3,
+      "DS (no temp buffer)": 42.8,
+      "DS (no adaptive wt)": 42.8,
+      "DS (no context rules)": 42.8
+    },
+    {
+      "scenario": "Slippery Road in Rain",
+      "expected": "increase",
+      "DZ-Only": 50.0,
+      "Weighted Avg": 50.0,
+      "DS Fusion (full)": 88.9,
+      "Murphy's Rule": 64.9,
+      "DS (no temp buffer)": 63.0,
+      "DS (no adaptive wt)": 63.0,
+      "DS (no context rules)": 63.0
+    },
+    {
+      "scenario": "Night Level Crossing",
+      "expected": "increase",
+      "DZ-Only": 55.0,
+      "Weighted Avg": 55.0,
+      "DS Fusion (full)": 75.4,
+      "Murphy's Rule": 70.7,
+      "DS (no temp buffer)": 69.2,
+      "DS (no adaptive wt)": 69.2,
+      "DS (no context rules)": 69.2
+    },
+    {
+      "scenario": "Motorway Info",
+      "expected": "maintain",
+      "DZ-Only": 30.0,
+      "Weighted Avg": 20.2,
+      "DS Fusion (full)": 25.0,
+      "Murphy's Rule": 20.7,
+      "DS (no temp buffer)": 25.3,
+      "DS (no adaptive wt)": 25.3,
+      "DS (no context rules)": 25.3
+    }
+  ]
 }
