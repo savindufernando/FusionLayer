@@ -73,6 +73,12 @@ export interface FusedPredictionResponse {
     active_signs: ActiveSign[];
     timestamp: string;
     fusion_method: string;
+    adaptive_weights: {
+        degraded?: boolean;
+        dz_circuit?: string;
+        tsr_circuit?: string;
+        [key: string]: any;
+    };
 }
 
 export interface HealthResponse {
