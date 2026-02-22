@@ -48,13 +48,13 @@ export function useVoiceCommand() {
             const transcript = event.results[last][0].transcript.trim().toLowerCase();
 
             setState(s => ({ ...s, transcript }));
-            console.log("🎤 Heard:", transcript);
+            console.log("Voice Heard:", transcript);
 
             // Command Matching
             let matched = false;
             Object.entries(commandsRef.current).forEach(([keyword, handler]) => {
                 if (transcript.includes(keyword.toLowerCase())) {
-                    console.log("✅ Matched command:", keyword);
+                    console.log("Voice Matched command:", keyword);
                     setState(s => ({ ...s, lastCommand: keyword }));
                     handler();
                     matched = true;
