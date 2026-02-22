@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getDriverProfile, getTrips } from '../services/api';
 import type { TripResponse, DriverProfileResponse } from '../types';
+import { TrendingUp } from 'lucide-react';
 
 export default function HistoryPanel({ onClose }: { onClose: () => void }) {
     const [profile, setProfile] = useState<DriverProfileResponse | null>(null);
@@ -26,7 +27,7 @@ export default function HistoryPanel({ onClose }: { onClose: () => void }) {
         <div className="overlay-backdrop" onClick={onClose}>
             <div className="card history-card animate-in" onClick={e => e.stopPropagation()}>
                 <div className="card-header history-header">
-                    <h2>Driver Safety Profile 📈</h2>
+                    <h2>Driver Safety Profile <TrendingUp size={16} style={{ display: 'inline', verticalAlign: 'middle' }} /></h2>
                     <button className="btn-close" onClick={onClose}>×</button>
                 </div>
 
@@ -74,7 +75,7 @@ export default function HistoryPanel({ onClose }: { onClose: () => void }) {
                                         <tr key={t.id}>
                                             <td>
                                                 <div style={{ fontWeight: 500 }}>{new Date(t.start_time).toLocaleDateString()}</div>
-                                                <div style={{ fontSize: '0.8em', color: '#888' }}>{new Date(t.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                                                <div style={{ fontSize: '0.8em', color: 'var(--text-tertiary)' }}>{new Date(t.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                                             </td>
                                             <td>{Math.floor(t.duration_seconds / 60)}m {t.duration_seconds % 60}s</td>
                                             <td>{t.distance_km.toFixed(1)}</td>
