@@ -1,4 +1,5 @@
 import type { WeatherScenario } from '../types';
+import { MapPin, Camera, Zap, Cloud, Sun, CloudRain, CloudFog, Moon, CloudLightning } from 'lucide-react';
 
 interface ControlsProps {
     isTracking: boolean;
@@ -14,6 +15,7 @@ interface ControlsProps {
     onWeatherChange: (w: WeatherScenario) => void;
     onReset: () => void;
     onDownloadReport?: () => void;
+    onExportJSON?: () => void;
     hasTripData?: boolean;
     onShowHistory?: () => void;
 }
@@ -32,6 +34,7 @@ export default function Controls({
     onWeatherChange,
     onReset,
     onDownloadReport,
+    onExportJSON,
     hasTripData,
     onShowHistory,
 }: ControlsProps) {
@@ -77,8 +80,8 @@ export default function Controls({
 
                 {/* Report Download */}
                 {!isTracking && hasTripData && (
-                    <div className="controls-row" style={{ marginTop: '0.5rem' }}>
-                        <button className="btn btn-success" onClick={onDownloadReport} style={{ width: '100%', background: '#4f46e5', borderColor: '#4f46e5' }}>
+                    <div className="controls-row" style={{ marginTop: '0.5rem', gap: '0.5rem' }}>
+                        <button className="btn btn-success" onClick={onDownloadReport} style={{ flex: 1, background: '#4f46e5', borderColor: '#4f46e5' }}>
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                                 <polyline points="14 2 14 8 20 8" />
@@ -86,7 +89,15 @@ export default function Controls({
                                 <line x1="16" y1="17" x2="8" y2="17" />
                                 <polyline points="10 9 9 9 8 9" />
                             </svg>
-                            Download Trip Report
+                            Report <span className="kbd-hint">D</span>
+                        </button>
+                        <button className="btn btn-outline" onClick={onExportJSON} style={{ flex: 1, borderColor: 'var(--border-color)', color: 'var(--text-secondary)' }}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="7 10 12 15 17 10" />
+                                <line x1="12" y1="15" x2="12" y2="3" />
+                            </svg>
+                            Export JSON
                         </button>
                     </div>
                 )}
@@ -105,7 +116,7 @@ export default function Controls({
                 {/* System Status */}
                 <div className="module-status-grid">
                     <div className={`module-status-item ${gpsPermission === 'granted' ? 'active' : gpsPermission === 'denied' ? 'error' : ''}`}>
-                        <span className="module-status-icon">📍</span>
+                        <span className="module-status-icon"><MapPin size={16} /></span>
                         <div className="module-status-info">
                             <span className="module-status-name">GPS</span>
                             <span className="module-status-state">
@@ -117,7 +128,7 @@ export default function Controls({
                         </div>
                     </div>
                     <div className={`module-status-item ${cameraActive ? 'active' : cameraError ? 'error' : ''}`}>
-                        <span className="module-status-icon">📷</span>
+                        <span className="module-status-icon"><Camera size={16} /></span>
                         <div className="module-status-info">
                             <span className="module-status-name">Camera</span>
                             <span className="module-status-state">
@@ -126,7 +137,7 @@ export default function Controls({
                         </div>
                     </div>
                     <div className={`module-status-item ${isFusing ? 'active' : ''}`}>
-                        <span className="module-status-icon">⚡</span>
+                        <span className="module-status-icon"><Zap size={16} /></span>
                         <div className="module-status-info">
                             <span className="module-status-name">Fusion</span>
                             <span className="module-status-state">
@@ -141,12 +152,12 @@ export default function Controls({
                     <label className="control-label">Weather Scenario</label>
                     <div className="weather-pills">
                         {([
-                            { val: 'realtime' as WeatherScenario, icon: '☁️', label: 'Real-Time' },
-                            { val: 'sunny' as WeatherScenario, icon: '☀️', label: 'Sunny' },
-                            { val: 'rain' as WeatherScenario, icon: '🌧️', label: 'Rain' },
-                            { val: 'fog' as WeatherScenario, icon: '🌫️', label: 'Fog' },
-                            { val: 'night' as WeatherScenario, icon: '🌙', label: 'Night' },
-                            { val: 'storm' as WeatherScenario, icon: '⛈️', label: 'Storm' },
+                            { val: 'realtime' as WeatherScenario, icon: <Cloud size={14} />, label: 'Real-Time' },
+                            { val: 'sunny' as WeatherScenario, icon: <Sun size={14} />, label: 'Sunny' },
+                            { val: 'rain' as WeatherScenario, icon: <CloudRain size={14} />, label: 'Rain' },
+                            { val: 'fog' as WeatherScenario, icon: <CloudFog size={14} />, label: 'Fog' },
+                            { val: 'night' as WeatherScenario, icon: <Moon size={14} />, label: 'Night' },
+                            { val: 'storm' as WeatherScenario, icon: <CloudLightning size={14} />, label: 'Storm' },
                         ]).map(w => (
                             <button
                                 key={w.val}
