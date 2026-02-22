@@ -1,3 +1,4 @@
+import { OctagonX, CornerDownRight, TriangleAlert, PersonStanding, Siren, Hash, ParkingSquare, Route, RefreshCcw, Construction, Diamond, Camera } from 'lucide-react';
 import type { FusedPredictionResponse, ActiveSign } from '../types';
 
 interface Props {
@@ -12,18 +13,18 @@ function formatSignName(name: string): string {
         .replace(/\(.*?\)/g, match => match.toLowerCase());
 }
 
-function signIcon(name: string): string {
-    if (name.includes('stop')) return '🛑';
-    if (name.includes('curve') || name.includes('double_curve')) return '↪️';
-    if (name.includes('slippery')) return '⚠️';
-    if (name.includes('pedestrian')) return '🚶';
-    if (name.includes('accident')) return '🚨';
-    if (name.includes('speed') || name.includes('school')) return '🔢';
-    if (name.includes('parking')) return '🅿️';
-    if (name.includes('motorway')) return '🛣️';
-    if (name.includes('roundabout')) return '🔄';
-    if (name.includes('crossing') || name.includes('level')) return '🚧';
-    return '🔶';
+function signIcon(name: string): React.ReactNode {
+    if (name.includes('stop')) return <OctagonX size={18} />;
+    if (name.includes('curve') || name.includes('double_curve')) return <CornerDownRight size={18} />;
+    if (name.includes('slippery')) return <TriangleAlert size={18} />;
+    if (name.includes('pedestrian')) return <PersonStanding size={18} />;
+    if (name.includes('accident')) return <Siren size={18} />;
+    if (name.includes('speed') || name.includes('school')) return <Hash size={18} />;
+    if (name.includes('parking')) return <ParkingSquare size={18} />;
+    if (name.includes('motorway')) return <Route size={18} />;
+    if (name.includes('roundabout')) return <RefreshCcw size={18} />;
+    if (name.includes('crossing') || name.includes('level')) return <Construction size={18} />;
+    return <Diamond size={18} />;
 }
 
 export default function SystemSignDetection({ result, currentSign }: Props) {
@@ -62,7 +63,7 @@ export default function SystemSignDetection({ result, currentSign }: Props) {
                     </div>
                 ) : (
                     <div className="detected-sign empty">
-                        <span className="detected-sign-icon">📷</span>
+                        <span className="detected-sign-icon"><Camera size={18} /></span>
                         <div className="detected-sign-info">
                             <div className="detected-sign-name">{currentSign ? formatSignName(currentSign) : 'No sign detected'}</div>
                             <div className="detected-sign-meta">Dashcam scanning road ahead...</div>
