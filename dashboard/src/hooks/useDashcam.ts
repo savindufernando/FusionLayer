@@ -74,7 +74,7 @@ export function useDashcam() {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
         // Convert to base64 JPEG (remove the data:image/jpeg;base64, prefix)
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
         return dataUrl.split(',')[1];
     }, [isActive]);
 
