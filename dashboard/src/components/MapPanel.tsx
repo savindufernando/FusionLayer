@@ -133,7 +133,7 @@ export default function MapPanel({ lat, lng, heading, trail, isMoving: _isMoving
             const m = L.marker([h.latitude, h.longitude], { icon: hotspotIcon });
             m.bindPopup(`
         <div style="font-family: Inter, sans-serif; min-width: 180px;">
-          <b style="font-size: 13px;">⚠️ ${h.name}</b><br/>
+          <b style="font-size: 13px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" style="vertical-align: middle;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> ${h.name}</b><br/>
           <span style="font-size: 11px; color: #64748b;">Accident Black Spot</span>
           <hr style="margin: 6px 0; border: none; border-top: 1px solid #e2e8f0;" />
           <div style="font-size: 12px;">
@@ -156,7 +156,7 @@ export default function MapPanel({ lat, lng, heading, trail, isMoving: _isMoving
         const carIcon = L.divIcon({
             className: 'car-marker',
             html: `<div class="car-marker-inner" style="transform: rotate(${heading}deg)">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="${hasGPS ? '#4f46e5' : '#94a3b8'}">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="${hasGPS ? 'var(--accent-primary)' : 'var(--text-tertiary)'}">
           <path d="M12 2L4 20h16L12 2z"/>
         </svg>
       </div>`,
@@ -215,7 +215,7 @@ export default function MapPanel({ lat, lng, heading, trail, isMoving: _isMoving
                     Live Map
                 </h2>
                 <div className="map-header-right">
-                    <span className="hotspot-count-badge">⚫ {hotspots.length} Black Spots</span>
+                    <span className="hotspot-count-badge"><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#1e293b', marginRight: 6, verticalAlign: 'middle' }} /> {hotspots.length} Black Spots</span>
                     <span className="coord-badge">
                         {hasGPS ? `${displayLat.toFixed(4)}, ${displayLng.toFixed(4)}` : 'Waiting for GPS...'}
                     </span>
