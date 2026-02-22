@@ -8,6 +8,7 @@ Endpoints:
   GET  /api/fusion/health        — Health check
   GET  /api/fusion/conflict-log  — DS conflict log for research analysis
   GET  /api/fusion/ontology      — List sign-risk ontology profiles
+  GET  /api/fusion/segment-insights — Segment-level learning insights
   POST /api/fusion/reset         — Reset engine state (new trip)
 """
 
@@ -19,10 +20,12 @@ import httpx
 import base64
 from pathlib import Path
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent / ".env")
+
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 
@@ -36,8 +39,12 @@ from .schemas import (
     ConflictLogEntry,
     FusionHealthResponse,
     OntologyResponse,
-    OntologyProfileResponse
+    OntologyProfileResponse,
+    SegmentInsightResponse,
+    SegmentInsightsResponse
 )
+from .security import apply_security
+from .circuit_breaker import CircuitBreaker
 
 from src.fusion_engine import FusionEngine, TSRInput, DZInput, HotspotInput
 
@@ -47,6 +54,37 @@ engine: Optional[FusionEngine] = None
 config: dict = {}
 
 logger = logging.getLogger("fusion_api")
+
+# Circuit breakers for external module calls
+cb_dz = CircuitBreaker("dz_module", failure_threshold=3, recovery_timeout=30)
+cb_tsr = CircuitBreaker("tsr_module", failure_threshold=3, recovery_timeout=30)
+
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        logger.info(f"Fusion WebSocket: Client connected. Total: {len(self.active_connections)}")
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+            logger.info("Fusion WebSocket: Client disconnected")
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                # Connection might be dead
+                logger.debug(f"Fusion WebSocket: Broadcast failed for one client: {e}")
+
+
+manager = ConnectionManager()
 
 
 def load_config() -> dict:
@@ -112,13 +150,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+apply_security(app, module_name="fusion")
 
 # Serve dashboard static files
 dashboard_dir = Path(__file__).parent.parent / "dashboard"
@@ -186,7 +218,7 @@ async def fused_predict_auto(request: FusedPredictionRequest):
     Automatic fused risk prediction.
     
     Calls TSR and DZ module APIs, then fuses their outputs.
-    Requires both modules to be running as services.
+    Uses circuit breakers to handle module failures gracefully.
     """
     if engine is None:
         raise HTTPException(status_code=503, detail="Fusion engine not initialized")
@@ -195,44 +227,67 @@ async def fused_predict_auto(request: FusedPredictionRequest):
     tsr_endpoint = config.get("tsr_endpoint", "/predict")
     dz_url = config.get("dz_url", "http://localhost:8000")
     dz_endpoint = config.get("dz_endpoint", "/api/predict")
+    degraded = False
     
     async with httpx.AsyncClient(timeout=10.0) as client:
-        # ─── Call DZ Module ───────────────────────────────────────
-        try:
-            dz_response = await client.post(
-                f"{dz_url}{dz_endpoint}",
-                json={
-                    "latitude": request.latitude,
-                    "longitude": request.longitude,
-                    "heading": request.heading,
-                    "speed_kph": request.speed_kph,
-                    "scenario": request.scenario
-                }
-            )
-            dz_data = dz_response.json()
-            
+        # ─── Call DZ Module (with circuit breaker) ─────────────────
+        dz = None
+        if cb_dz.can_execute():
+            try:
+                dz_response = await client.post(
+                    f"{dz_url}{dz_endpoint}",
+                    json={
+                        "latitude": request.latitude,
+                        "longitude": request.longitude,
+                        "heading": request.heading,
+                        "speed_kph": request.speed_kph,
+                        "scenario": request.scenario
+                    }
+                )
+                dz_data = dz_response.json()
+                
+                dz = DZInput(
+                    risk_score=dz_data.get("risk_score", 0),
+                    risk_level=dz_data.get("risk_level", "LOW"),
+                    confidence=dz_data.get("confidence", 0.5),
+                    risk_probability=dz_data.get("risk_score", 0) / 100.0,
+                    weather_condition=dz_data.get("weather_condition", "Fine"),
+                    road_surface=dz_data.get("road_surface", "Dry"),
+                    is_overspeeding=dz_data.get("is_overspeeding", False),
+                    speed_deviation_kph=dz_data.get("speed_deviation_kph", 0),
+                    speed_kph=request.speed_kph,
+                    reasons=dz_data.get("reasons", [])
+                )
+                cb_dz.record_success()
+            except Exception as e:
+                cb_dz.record_failure()
+                logger.error(f"DZ module call failed: {e}")
+        else:
+            logger.warning("DZ circuit breaker OPEN — using speed-based fallback")
+        
+        # DZ fallback: speed-based risk estimate
+        if dz is None:
+            degraded = True
+            speed = request.speed_kph
+            fallback_risk = min(speed * 0.8, 70)  # Simple speed → risk mapping
+            fallback_level = "HIGH" if fallback_risk > 60 else "MEDIUM" if fallback_risk > 30 else "LOW"
             dz = DZInput(
-                risk_score=dz_data.get("risk_score", 0),
-                risk_level=dz_data.get("risk_level", "LOW"),
-                confidence=dz_data.get("confidence", 0.5),
-                risk_probability=dz_data.get("risk_score", 0) / 100.0,
-                weather_condition=dz_data.get("weather_condition", "Fine"),
-                road_surface=dz_data.get("road_surface", "Dry"),
-                is_overspeeding=dz_data.get("is_overspeeding", False),
-                speed_deviation_kph=dz_data.get("speed_deviation_kph", 0),
-                speed_kph=request.speed_kph,
-                reasons=dz_data.get("reasons", [])
-            )
-        except Exception as e:
-            logger.error(f"DZ module call failed: {e}")
-            raise HTTPException(
-                status_code=502,
-                detail=f"DZ module unavailable: {str(e)}"
+                risk_score=fallback_risk,
+                risk_level=fallback_level,
+                confidence=0.3,  # Low confidence — it's a fallback
+                risk_probability=fallback_risk / 100.0,
+                weather_condition="Fine",
+                road_surface="Dry",
+                is_overspeeding=speed > 80,
+                speed_deviation_kph=max(0, speed - 60),
+                speed_kph=speed,
+                reasons=[{"feature": "fallback", "direction": "info",
+                          "description": "DZ module unavailable — speed-based estimate"}]
             )
         
-        # ─── Call TSR Module (if image provided) ──────────────────
+        # ─── Call TSR Module (with circuit breaker) ────────────────
         tsr = None
-        if request.image_base64:
+        if request.image_base64 and cb_tsr.can_execute():
             try:
                 tsr_response = await client.post(
                     f"{tsr_url}{tsr_endpoint}",
@@ -248,12 +303,28 @@ async def fused_predict_auto(request: FusedPredictionRequest):
                     latitude=request.latitude,
                     longitude=request.longitude
                 )
+                cb_tsr.record_success()
             except Exception as e:
+                cb_tsr.record_failure()
                 logger.warning(f"TSR module call failed (continuing DZ-only): {e}")
+        elif request.image_base64 and not cb_tsr.can_execute():
+            logger.warning("TSR circuit breaker OPEN — skipping TSR")
+            degraded = True
     
     # Fuse
     result = engine.fuse(dz_input=dz, tsr_input=tsr)
-    return _result_to_response(result)
+    response = _result_to_response(result)
+    
+    # Add degraded flag if any module was unavailable
+    if degraded:
+        response.adaptive_weights["degraded"] = True
+        response.adaptive_weights["dz_circuit"] = cb_dz.state.value
+        response.adaptive_weights["tsr_circuit"] = cb_tsr.state.value
+    
+    # Broadcast result to WebSocket clients for real-time updates
+    await manager.broadcast(response.dict())
+    
+    return response
 
 
 @app.get("/api/fusion/health", response_model=FusionHealthResponse)
@@ -277,6 +348,30 @@ async def health_check():
         conflict_log_size=len(engine.get_conflict_log()),
         fusion_method=engine.config.get("fusion_method", "dempster_shafer")
     )
+
+
+@app.get("/api/fusion/circuit-status")
+async def circuit_status():
+    """Circuit breaker status for DZ and TSR modules."""
+    return {
+        "dz": cb_dz.get_status(),
+        "tsr": cb_tsr.get_status(),
+    }
+
+
+@app.websocket("/api/fusion/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for real-time risk updates."""
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Keep connection alive, though we mostly push data
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        manager.disconnect(websocket)
 
 
 @app.get("/api/fusion/conflict-log", response_model=ConflictLogResponse)
@@ -330,6 +425,25 @@ async def reset_engine():
     return {"status": "reset", "message": "Buffer, EMA history, and conflict log cleared"}
 
 
+@app.get("/api/fusion/segment-insights", response_model=SegmentInsightsResponse)
+async def get_segment_insights():
+    """
+    Get segment-level learning insights.
+    
+    Returns accumulated per-road-segment statistics including
+    average risk, conflict rate, and calibration warnings.
+    Segments persist across trips within the same session.
+    """
+    if engine is None:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+    
+    insights = engine.get_segment_insights()
+    return SegmentInsightsResponse(
+        count=len(insights),
+        segments=[SegmentInsightResponse(**s) for s in insights]
+    )
+
+
 # ─── Helpers ──────────────────────────────────────────────────────────────
 
 def _result_to_response(result) -> FusedPredictionResponse:
@@ -352,6 +466,7 @@ def _result_to_response(result) -> FusedPredictionResponse:
         active_signs=[
             ActiveSignResponse(**s) for s in result.active_signs
         ],
+        adaptive_weights=result.adaptive_weights,
         timestamp=result.timestamp,
         fusion_method=result.fusion_method
     )
