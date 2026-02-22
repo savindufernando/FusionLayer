@@ -1,12 +1,14 @@
 import { useEffect, useRef, useMemo } from 'react';
+import { TriangleAlert } from 'lucide-react';
 
 interface RiskGaugeProps {
     score: number | null;
     level: 'LOW' | 'MEDIUM' | 'HIGH' | null;
     confidence: number | null;
+    degraded?: boolean;
 }
 
-export default function RiskGauge({ score, level, confidence }: RiskGaugeProps) {
+export default function RiskGauge({ score, level, confidence, degraded }: RiskGaugeProps) {
     const displayScore = score ?? 0;
     const displayLevel = level ?? '—';
     const prevScoreRef = useRef(0);
@@ -68,6 +70,11 @@ export default function RiskGauge({ score, level, confidence }: RiskGaugeProps) 
                 <span className={`risk-badge ${level ? level.toLowerCase() : ''}`}>
                     {displayLevel}
                 </span>
+                {degraded && (
+                    <span className="risk-badge" style={{ background: '#f59e0b', color: 'white', marginLeft: '0.5rem' }} title="Operating in degraded mode (partial sensor data)">
+                        <TriangleAlert size={12} style={{ display: 'inline', verticalAlign: 'middle' }} /> Degraded
+                    </span>
+                )}
             </div>
             <div className="gauge-wrapper">
                 <svg viewBox="0 0 200 140" className="gauge-svg">
