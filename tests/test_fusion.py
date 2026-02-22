@@ -13,7 +13,8 @@ from src.sign_risk_ontology import (
     SignRiskOntology, SignRiskCategory, ContextCondition, SignRiskProfile
 )
 from src.evidence import (
-    MassFunction, EvidenceConstructor, dempster_combine, combine_multiple
+    MassFunction, EvidenceConstructor, dempster_combine, combine_multiple,
+    murphy_combine, murphy_combine_multiple
 )
 from src.temporal_buffer import (
     TemporalSignBuffer, SignDetection, AggregateSignEvidence
@@ -312,6 +313,107 @@ class TestEvidenceConstructor:
         """No hotspot → ignorance."""
         m = EvidenceConstructor.from_hotspot(risk_boost=0.0, report_count=0)
         assert m.m_uncertain >= 0.99
+
+
+# =====================================================================
+# MURPHY'S RULE TESTS
+# =====================================================================
+
+class TestMurphyCombination:
+    """Tests for Murphy's modified combination rule."""
+    
+    def test_murphy_agreeing_evidence(self):
+        """Agreeing evidence should reinforce each other."""
+        masses = [
+            MassFunction(m_safe=0.1, m_dangerous=0.6, m_uncertain=0.3, source="a"),
+            MassFunction(m_safe=0.1, m_dangerous=0.5, m_uncertain=0.4, source="b"),
+        ]
+        combined, K = murphy_combine(masses)
+        
+        # Should reinforce danger
+        assert combined.m_dangerous > 0.5
+        # Low conflict on agreement
+        assert K < 0.2
+    
+    def test_murphy_conflicting_evidence(self):
+        """High-conflict evidence should NOT fallback to pure ignorance (unlike Dempster)."""
+        masses = [
+            MassFunction(m_safe=0.8, m_dangerous=0.0, m_uncertain=0.2, source="safe"),
+            MassFunction(m_safe=0.0, m_dangerous=0.8, m_uncertain=0.2, source="danger"),
+        ]
+        
+        # Dempster: high conflict
+        ds_combined, ds_K = dempster_combine(masses[0], masses[1])
+        
+        # Murphy: should handle gracefully
+        mu_combined, mu_K = murphy_combine(masses)
+        
+        # Murphy should produce a more moderate result
+        assert mu_combined.m_uncertain > 0  # Not zero uncertainty
+        # Murphy conflict should be lower than Dempster conflict
+        assert mu_K < ds_K
+    
+    def test_murphy_with_ignorance(self):
+        """Combining with ignorance should not drastically change evidence."""
+        masses = [
+            MassFunction(m_safe=0.2, m_dangerous=0.5, m_uncertain=0.3, source="a"),
+            MassFunction(m_safe=0.0, m_dangerous=0.0, m_uncertain=1.0, source="ign"),
+        ]
+        combined, K = murphy_combine(masses)
+        
+        # Result should still lean dangerous
+        assert combined.m_dangerous > combined.m_safe
+        assert K < 0.1
+    
+    def test_murphy_matches_dempster_on_low_conflict(self):
+        """For low-conflict sources, Murphy ≈ Dempster in direction."""
+        masses = [
+            MassFunction(m_safe=0.1, m_dangerous=0.4, m_uncertain=0.5, source="a"),
+            MassFunction(m_safe=0.15, m_dangerous=0.35, m_uncertain=0.5, source="b"),
+        ]
+        
+        ds_combined, _ = dempster_combine(masses[0], masses[1])
+        mu_combined, _ = murphy_combine(masses)
+        
+        # Both should point in the same direction
+        assert ds_combined.m_dangerous > ds_combined.m_safe
+        assert mu_combined.m_dangerous > mu_combined.m_safe
+    
+    def test_murphy_three_sources(self):
+        """Murphy handles 3+ sources correctly."""
+        masses = [
+            MassFunction(m_safe=0.1, m_dangerous=0.5, m_uncertain=0.4, source="a"),
+            MassFunction(m_safe=0.1, m_dangerous=0.4, m_uncertain=0.5, source="b"),
+            MassFunction(m_safe=0.1, m_dangerous=0.3, m_uncertain=0.6, source="c"),
+        ]
+        combined, K = murphy_combine(masses)
+        
+        # Should reinforce danger with 3 agreeing sources
+        assert combined.m_dangerous > 0.5
+        assert 0 <= K <= 1
+    
+    def test_murphy_empty_list(self):
+        """Empty list returns ignorance."""
+        combined, K = murphy_combine([])
+        assert combined.m_uncertain == 1.0
+        assert K == 0.0
+    
+    def test_murphy_single(self):
+        """Single mass function returns itself."""
+        m = MassFunction(m_safe=0.3, m_dangerous=0.4, m_uncertain=0.3, source="a")
+        combined, K = murphy_combine([m])
+        assert abs(combined.m_dangerous - 0.4) < 1e-6
+        assert K == 0.0
+    
+    def test_murphy_combine_multiple_interface(self):
+        """murphy_combine_multiple returns list of conflicts."""
+        masses = [
+            MassFunction(m_safe=0.1, m_dangerous=0.5, m_uncertain=0.4, source="a"),
+            MassFunction(m_safe=0.1, m_dangerous=0.4, m_uncertain=0.5, source="b"),
+        ]
+        combined, conflicts = murphy_combine_multiple(masses)
+        assert isinstance(conflicts, list)
+        assert combined.m_dangerous > 0.4
 
 
 # =====================================================================
