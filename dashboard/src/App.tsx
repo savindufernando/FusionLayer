@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { Mic, MicOff } from 'lucide-react';
 import Header from './components/Header';
 import MapPanel from './components/MapPanel';
 import DashcamFeed from './components/DashcamFeed';
@@ -17,6 +18,7 @@ import { useVoiceAlert } from './hooks/useVoiceAlert';
 import { generateTripReport } from './services/report';
 import { resetEngine, saveTrip } from './services/api';
 import { useVoiceCommand } from './hooks/useVoiceCommand';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import type { WeatherScenario, TripCreate } from './types';
 
 function App() {
@@ -66,9 +68,46 @@ function App() {
     generateTripReport(fusion.state.tripStats, fusion.state.fullHistory);
   }, [fusion.state]);
 
+  const handleExportJSON = useCallback(() => {
+    const exportData = {
+      exportedAt: new Date().toISOString(),
+      tripStats: fusion.state.tripStats,
+      history: fusion.state.fullHistory,
+      tickCount: fusion.state.tickCount,
+      lastFusionResult: fusion.state.fusionResult,
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `driveguard-export-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [fusion.state]);
+
   const handleVideoReady = useCallback((video: HTMLVideoElement) => {
     dashcam.startCamera(video);
   }, [dashcam]);
+
+  // Theme toggle helper (mirrors Header state via DOM)
+  const toggleTheme = useCallback(() => {
+    const el = document.documentElement;
+    const current = el.dataset.theme;
+    const next = current === 'dark' ? 'light' : 'dark';
+    el.dataset.theme = next;
+    localStorage.setItem('dg-theme', next);
+  }, []);
+
+  // Keyboard Shortcuts
+  useKeyboardShortcuts({
+    onStartStop: useCallback(() => {
+      if (fusion.state.isRunning) handleStop(); else handleStart();
+    }, [fusion.state.isRunning, handleStart, handleStop]),
+    onReset: handleReset,
+    onDownloadReport: handleDownloadReport,
+    onToggleHistory: useCallback(() => setShowHistory(prev => !prev), []),
+    onToggleTheme: toggleTheme,
+  });
 
   // Voice Alerts Integration
   const voice = useVoiceAlert();
@@ -108,8 +147,6 @@ function App() {
       const res = fusionStateRef.current.fusionResult;
       if (res) {
         if (voiceCommand.state.lang === 'si-LK') {
-          // Basic Sinhala TTS fallback (if supported) or English
-          // "Risk level is X" -> "Avadhanam mattama X"
           const riskSi = res.fused_risk_level === 'HIGH' ? 'Ithamaavadhaanam' : 'Samanya';
           voice.speak(`Avadhanam mattama ${riskSi}`);
         } else {
@@ -121,16 +158,14 @@ function App() {
     });
 
     // Sinhala Commands
-    voiceCommand.registerCommand('vartha karanna', handleStart); // "Start"
-    voiceCommand.registerCommand('navathvanna', handleStop); // "Stop"
-    voiceCommand.registerCommand('ithihasaya', () => setShowHistory(true)); // "History"
-    voiceCommand.registerCommand('vasanna', () => setShowHistory(false)); // "Close"
-    voiceCommand.registerCommand('thathvaya', () => { // "Status"
+    voiceCommand.registerCommand('vartha karanna', handleStart);
+    voiceCommand.registerCommand('navathvanna', handleStop);
+    voiceCommand.registerCommand('ithihasaya', () => setShowHistory(true));
+    voiceCommand.registerCommand('vasanna', () => setShowHistory(false));
+    voiceCommand.registerCommand('thathvaya', () => {
       const res = fusionStateRef.current.fusionResult;
       if (res) {
         if (voiceCommand.state.lang === 'si-LK') {
-          // Basic Sinhala TTS fallback (if supported) or English
-          // "Risk level is X" -> "Avadhanam mattama X"
           const riskSi = res.fused_risk_level === 'HIGH' ? 'Ithamaavadhaanam' : 'Samanya';
           voice.speak(`Avadhanam mattama ${riskSi}`);
         } else {
@@ -148,24 +183,24 @@ function App() {
       {/* Voice Status Indicator */}
       <div style={{
         position: 'fixed', top: '1rem', left: '50%', transform: 'translateX(-50%)', zIndex: 3000,
-        background: voiceCommand.state.isListening ? 'rgba(34, 197, 94, 0.2)' : 'rgba(0,0,0,0.5)',
+        background: voiceCommand.state.isListening ? 'rgba(34, 197, 94, 0.2)' : 'var(--bg-tertiary)',
         padding: '4px 12px', borderRadius: '16px', backdropFilter: 'blur(4px)',
-        border: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', gap: '8px',
+        border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '8px',
         transition: 'all 0.3s'
       }}>
-        <span style={{ fontSize: '12px', color: voiceCommand.state.isListening ? '#4ade80' : '#888' }}>
-          {voiceCommand.state.isListening ? '🎙️' : '🔇'}
+        <span style={{ fontSize: '12px', color: voiceCommand.state.isListening ? '#4ade80' : 'var(--text-tertiary)' }}>
+          {voiceCommand.state.isListening ? <Mic size={12} /> : <MicOff size={12} />}
           {voiceCommand.state.lang === 'si-LK' ? ' සිංහල' : ' EN'}
         </span>
         {voiceCommand.state.transcript && (
-          <span style={{ fontSize: '12px', color: '#fff', borderLeft: '1px solid #444', paddingLeft: '8px' }}>
+          <span style={{ fontSize: '12px', color: 'var(--text-primary)', borderLeft: '1px solid var(--border-color)', paddingLeft: '8px' }}>
             "{voiceCommand.state.transcript}"
           </span>
         )}
         {/* Lang Toggle */}
         <button
           onClick={() => voiceCommand.setLanguage(voiceCommand.state.lang === 'en-US' ? 'si-LK' : 'en-US')}
-          style={{ background: 'none', border: '1px solid #555', color: '#ccc', borderRadius: '4px', fontSize: '10px', padding: '2px 4px', cursor: 'pointer', marginLeft: '4px' }}
+          style={{ background: 'none', border: '1px solid var(--border-color)', color: 'var(--text-tertiary)', borderRadius: '4px', fontSize: '10px', padding: '2px 4px', cursor: 'pointer', marginLeft: '4px' }}
         >
           {voiceCommand.state.lang === 'en-US' ? 'SI' : 'EN'}
         </button>
@@ -191,8 +226,6 @@ function App() {
             currentLat={gps.vehicle.lat}
             currentLng={gps.vehicle.lng}
             onHotspotClick={(_lat, _lng) => {
-              // Simple: just set the map by updating vehicle coords won't work
-              // So we scroll the map card into view — the hotspot markers are clickable too
               const mapEl = document.querySelector('.map-container');
               mapEl?.scrollIntoView({ behavior: 'smooth' });
             }}
@@ -206,6 +239,7 @@ function App() {
               score={fusion.state.fusionResult?.fused_risk_score ?? null}
               level={fusion.state.fusionResult?.fused_risk_level ?? null}
               confidence={fusion.state.fusionResult?.fused_confidence ?? null}
+              degraded={fusion.state.fusionResult?.adaptive_weights?.degraded}
             />
             <VehicleTelemetry
               speed={gps.vehicle.speed}
@@ -242,6 +276,7 @@ function App() {
             onWeatherChange={setWeather}
             onReset={handleReset}
             onDownloadReport={handleDownloadReport}
+            onExportJSON={handleExportJSON}
             hasTripData={fusion.state.tripStats.startTime !== null || fusion.state.tickCount > 10}
             onShowHistory={() => setShowHistory(true)}
           />
@@ -266,3 +301,4 @@ function App() {
 }
 
 export default App;
+
