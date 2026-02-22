@@ -143,6 +143,9 @@ class FusedPredictionResponse(BaseModel):
     fusion_reasons: List[FusionReasonResponse]
     active_signs: List[ActiveSignResponse]
     
+    # Adaptive weighting transparency
+    adaptive_weights: Dict = {}
+    
     # Metadata
     timestamp: str
     fusion_method: str
@@ -211,3 +214,22 @@ class OntologyResponse(BaseModel):
     """Full ontology listing."""
     total_classes: int
     profiles: List[OntologyProfileResponse]
+
+
+class SegmentInsightResponse(BaseModel):
+    """A road segment's accumulated learning insights."""
+    segment: str
+    lat: float
+    lon: float
+    avg_risk: float
+    max_risk: float
+    conflict_rate: float
+    prediction_count: int
+    needs_calibration: bool
+    last_seen: str
+
+
+class SegmentInsightsResponse(BaseModel):
+    """Response for segment insights endpoint."""
+    count: int
+    segments: List[SegmentInsightResponse]
