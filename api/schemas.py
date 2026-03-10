@@ -89,8 +89,8 @@ class ManualFusionRequest(BaseModel):
 class FusionReasonResponse(BaseModel):
     """A reason contributing to the fused risk assessment."""
     source: str
-    description: str
-    impact: str
+    description: Optional[str] = ""
+    impact: str = ""
 
 
 class ActiveSignResponse(BaseModel):
@@ -241,3 +241,143 @@ class SegmentInsightsResponse(BaseModel):
     """Response for segment insights endpoint."""
     count: int
     segments: List[SegmentInsightResponse]
+
+
+# ─── Mobile App Schemas (Flutter / Dart) ─────────────────────────────────
+
+class MobileAnalyzeRequest(BaseModel):
+    """
+    Request from the Flutter app (sent every 1-2 seconds).
+    This is the primary ingestion endpoint for the mobile ecosystem.
+    """
+    user_id: str = Field(..., description="Authenticated user ID")
+    vehicle_id: str = Field(..., description="Currently active vehicle ID")
+    trip_id: Optional[str] = Field(default=None, description="Active trip ID (if already started)")
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
+    heading: float = Field(default=0.0, ge=0, le=360)
+    speed_kph: float = Field(default=0.0, ge=0, le=250)
+    image_base64: Optional[str] = Field(default=None, description="Camera frame (JPEG base64)")
+
+
+class MobileAnalyzeResponse(BaseModel):
+    """
+    Simplified response for the Flutter app.
+    Contains the risk score, the LED command, and detected signs.
+    """
+    trip_id: str
+    risk_score: float = Field(..., ge=0, le=100)
+    risk_level: str  # LOW, MEDIUM, HIGH
+    alert_level: str  # GREEN, YELLOW, RED — sent directly to ESP32 via BLE
+    detected_signs: List[str] = []
+    belief_dangerous: float = 0.0
+    fused_confidence: float = 0.0
+    is_degraded: bool = False  # True if TSR or DZ module was unavailable
+    fusion_reasons: List[str] = []  # Human-readable reasons
+
+
+# ─── User / Vehicle / Trip CRUD Schemas ──────────────────────────────────
+
+class UserCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    email: str = Field(..., min_length=5, max_length=255)
+
+class UserResponse(BaseModel):
+    id: str
+    name: str
+    email: str
+    created_at: str
+    vehicle_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class VehicleCreate(BaseModel):
+    make_model: str = Field(..., min_length=1, max_length=255)
+    vehicle_type: str = Field(default="Car")
+    led_stick_mac: Optional[str] = Field(default=None, max_length=17)
+
+class VehicleResponse(BaseModel):
+    id: str
+    user_id: str
+    make_model: str
+    vehicle_type: str
+    led_stick_mac: Optional[str]
+    created_at: str
+    trip_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class TripResponse(BaseModel):
+    id: str
+    vehicle_id: str
+    start_time: str
+    end_time: Optional[str]
+    is_active: bool
+    avg_risk_score: float
+    max_risk_score: float
+    total_distance_km: float
+    red_alert_count: int
+    yellow_alert_count: int
+    point_count: int
+
+    class Config:
+        from_attributes = True
+
+
+class TripListResponse(BaseModel):
+    count: int
+    trips: List[TripResponse]
+
+
+# ─── Blackspot Report ────────────────────────────────────────────────────
+
+class BlackspotCreate(BaseModel):
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
+    description: Optional[str] = None
+    report_type: str = Field(default="hazard")
+
+class BlackspotResponse(BaseModel):
+    id: int
+    user_id: str
+    latitude: float
+    longitude: float
+    description: Optional[str]
+    report_type: str
+    created_at: str
+
+    class Config:
+        from_attributes = True
+
+
+# ─── Insurance Claim ─────────────────────────────────────────────────────
+
+class InsuranceClaimCreate(BaseModel):
+    vehicle_id: str
+    trip_id: Optional[str] = None
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
+    statement: Optional[str] = None
+    photo_urls: Optional[List[str]] = None
+
+class InsuranceClaimResponse(BaseModel):
+    id: str
+    user_id: str
+    vehicle_id: str
+    trip_id: Optional[str]
+    latitude: float
+    longitude: float
+    pre_crash_speed_kph: Optional[float]
+    pre_crash_risk_score: Optional[float]
+    weather_condition: Optional[str]
+    statement: Optional[str]
+    photo_urls: Optional[List[str]]
+    status: str
+    created_at: str
+
+    class Config:
+        from_attributes = True

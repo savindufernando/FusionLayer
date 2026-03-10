@@ -90,6 +90,15 @@ function App() {
     dashcam.startCamera(video);
   }, [dashcam]);
 
+  const handleVideoUpload = useCallback((file: File, video: HTMLVideoElement) => {
+    dashcam.startVideoFile(video, file).then(() => {
+      // Auto-start tracking when video is uploaded to simulate the drive
+      if (!gps.vehicle.isTracking) {
+        handleStart();
+      }
+    });
+  }, [dashcam, gps.vehicle.isTracking, handleStart]);
+
   // Theme toggle helper (mirrors Header state via DOM)
   const toggleTheme = useCallback(() => {
     const el = document.documentElement;
@@ -221,6 +230,7 @@ function App() {
             isActive={dashcam.isActive}
             error={dashcam.error}
             onVideoReady={handleVideoReady}
+            onVideoUpload={handleVideoUpload}
             result={fusion.state.fusionResult}
           />
           <HotspotPanel

@@ -5,10 +5,11 @@ interface Props {
     isActive: boolean;
     error: string | null;
     onVideoReady: (video: HTMLVideoElement) => void;
+    onVideoUpload?: (file: File, video: HTMLVideoElement) => void;
     result: FusedPredictionResponse | null;
 }
 
-export default function DashcamFeed({ isActive, error, onVideoReady, result }: Props) {
+export default function DashcamFeed({ isActive, error, onVideoReady, onVideoUpload, result }: Props) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const readyFired = useRef(false);
 
@@ -33,10 +34,21 @@ export default function DashcamFeed({ isActive, error, onVideoReady, result }: P
                     </svg>
                     Dashcam Feed
                 </h2>
-                <span className={`status-pill ${isActive ? 'online' : error ? 'offline' : ''}`}>
-                    <span className="status-dot" />
-                    {isActive ? 'LIVE' : error ? 'Error' : 'Waiting...'}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <label className="btn btn-outline" style={{ fontSize: '10px', padding: '4px 8px', cursor: 'pointer', margin: 0 }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '4px' }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+                        Upload Video
+                        <input type="file" accept="video/mp4,video/webm" style={{ display: 'none' }} onChange={(e) => {
+                            if (e.target.files && e.target.files[0] && onVideoUpload && videoRef.current) {
+                                onVideoUpload(e.target.files[0], videoRef.current);
+                            }
+                        }} />
+                    </label>
+                    <span className={`status-pill ${isActive ? 'online' : error ? 'offline' : ''}`}>
+                        <span className="status-dot" />
+                        {isActive ? 'LIVE' : error ? 'Error' : 'Waiting...'}
+                    </span>
+                </div>
             </div>
 
             <div className="dashcam-content">

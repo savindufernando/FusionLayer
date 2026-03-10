@@ -48,13 +48,38 @@ export function useDashcam() {
         }
     }, []);
 
+    const startVideoFile = useCallback(async (videoElement: HTMLVideoElement, file: File) => {
+        try {
+            setError(null);
+            videoRef.current = videoElement;
+
+            const url = URL.createObjectURL(file);
+            videoElement.srcObject = null;
+            videoElement.src = url;
+            videoElement.loop = true;
+            await videoElement.play();
+            setIsActive(true);
+
+            const canvas = document.createElement('canvas');
+            canvas.width = 640;
+            canvas.height = 480;
+            canvasRef.current = canvas;
+        } catch (err) {
+            setError(`Video error: ${(err as Error).message}`);
+            setIsActive(false);
+        }
+    }, []);
+
     const stopCamera = useCallback(() => {
         if (streamRef.current) {
             streamRef.current.getTracks().forEach(track => track.stop());
             streamRef.current = null;
         }
         if (videoRef.current) {
+            videoRef.current.pause();
             videoRef.current.srcObject = null;
+            videoRef.current.src = "";
+            videoRef.current.removeAttribute('src');
         }
         setIsActive(false);
     }, []);
@@ -87,5 +112,5 @@ export function useDashcam() {
         };
     }, []);
 
-    return { isActive, error, startCamera, stopCamera, captureFrame };
+    return { isActive, error, startCamera, startVideoFile, stopCamera, captureFrame };
 }

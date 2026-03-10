@@ -45,6 +45,8 @@ from .schemas import (
 )
 from .security import apply_security
 from .circuit_breaker import CircuitBreaker
+from .database import init_db
+from .mobile_router import router as mobile_router, init_mobile_router
 
 from src.fusion_engine import FusionEngine, TSRInput, DZInput, HotspotInput
 
@@ -113,7 +115,7 @@ def load_config() -> dict:
             "ema_alpha": raw.get("ema_alpha", 0.35),
             # Module URLs for auto-predict
             "tsr_url": raw.get("modules", {}).get("tsr", {}).get("url", "http://localhost:8001"),
-            "tsr_endpoint": raw.get("modules", {}).get("tsr", {}).get("predict_endpoint", "/predict"),
+            "tsr_endpoint": raw.get("modules", {}).get("tsr", {}).get("predict_endpoint", "/api/predict/base64"),
             "dz_url": raw.get("modules", {}).get("dz", {}).get("url", "http://localhost:8000"),
             "dz_endpoint": raw.get("modules", {}).get("dz", {}).get("predict_endpoint", "/api/predict"),
         }
@@ -127,11 +129,19 @@ async def lifespan(app: FastAPI):
     config = load_config()
     engine = FusionEngine(config)
     
+    # Initialize database tables
+    init_db()
+    logger.info("Database initialized")
+    
     errors = engine.ontology.validate()
     if errors:
         logger.warning(f"Ontology validation: {errors}")
     else:
         logger.info(f"Ontology loaded: {engine.ontology.num_classes} sign classes")
+    
+    # Initialize mobile router with shared fusion engine
+    init_mobile_router(engine, config)
+    logger.info("Mobile API router initialized")
     
     logger.info("Fusion Engine initialized")
     yield
@@ -151,6 +161,9 @@ app = FastAPI(
 )
 
 apply_security(app, module_name="fusion")
+
+# Include mobile API router
+app.include_router(mobile_router)
 
 # Serve dashboard static files
 dashboard_dir = Path(__file__).parent.parent / "dashboard"
@@ -229,7 +242,8 @@ async def fused_predict_auto(request: FusedPredictionRequest):
     dz_endpoint = config.get("dz_endpoint", "/api/predict")
     degraded = False
     
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    headers = {"x-api-key": os.getenv("DG_API_KEY", "")}
+    async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
         # ─── Call DZ Module (with circuit breaker) ─────────────────
         dz = None
         if cb_dz.can_execute():

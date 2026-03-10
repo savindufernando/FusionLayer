@@ -46,13 +46,14 @@ api:
   cors_origins:
     - "http://localhost:3000"
     - "http://localhost:5173"
+    - "*"  # Allow Flutter app connections from any device
 
 # ─── Module Endpoints ────────────────────────────────────────────────────
 # Endpoints for calling TSR and DZ modules (when running as services)
 modules:
   tsr:
     url: "http://localhost:8001"
-    predict_endpoint: "/predict"
+    predict_endpoint: "/api/predict/base64"
     timeout_seconds: 5
   dz:
     url: "http://localhost:8000"
