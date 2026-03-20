@@ -26,7 +26,8 @@ from sqlalchemy.orm import Session
 from .database import get_db
 from .models import (
     User, Vehicle, Trip, TelemetryPoint,
-    CrowdsourcedSign, BlackspotReport, InsuranceClaim
+    CrowdsourcedSign, BlackspotReport, InsuranceClaim, AccidentReport,
+    PermanentHotspot
 )
 from .schemas import (
     MobileAnalyzeRequest, MobileAnalyzeResponse,
@@ -34,7 +35,9 @@ from .schemas import (
     VehicleCreate, VehicleResponse,
     TripResponse, TripListResponse,
     BlackspotCreate, BlackspotResponse,
-    InsuranceClaimCreate, InsuranceClaimResponse
+    InsuranceClaimCreate, InsuranceClaimResponse,
+    HotspotItem, HotspotsListResponse,
+    AccidentReportCreate, AccidentReportResponse
 )
 from .circuit_breaker import CircuitBreaker
 
@@ -77,17 +80,31 @@ async def mobile_analyze(request: MobileAnalyzeRequest, db: Session = Depends(ge
     if _engine is None:
         raise HTTPException(status_code=503, detail="Fusion engine not initialized")
 
-    # ─── Validate user and vehicle exist ─────────────────────────
+    # ─── Get or auto-create user ────────────────────────────────
     user = db.query(User).filter(User.id == request.user_id).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        # Auto-create user for demo mode or first-time mobile connections
+        user = User(id=request.user_id, name="DriveGuard User", email=f"{request.user_id}@driveguard.app")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        logger.info(f"Auto-created user: {user.id}")
 
+    # ─── Get or auto-create vehicle ──────────────────────────────
     vehicle = db.query(Vehicle).filter(
-        Vehicle.id == request.vehicle_id,
-        Vehicle.user_id == request.user_id
+        Vehicle.id == request.vehicle_id
     ).first()
     if not vehicle:
-        raise HTTPException(status_code=404, detail="Vehicle not found for this user")
+        vehicle = Vehicle(
+            id=request.vehicle_id,
+            user_id=user.id,
+            make_model="Demo Vehicle",
+            vehicle_type="Car"
+        )
+        db.add(vehicle)
+        db.commit()
+        db.refresh(vehicle)
+        logger.info(f"Auto-created vehicle: {vehicle.id} for user {user.id}")
 
     # ─── Get or create active trip ───────────────────────────────
     trip = None
@@ -422,6 +439,7 @@ async def get_nearby_blackspots(
                 "longitude": r.longitude,
                 "description": r.description,
                 "report_type": r.report_type,
+                "hazard_type": r.report_type,  # alias for mobile compatibility
                 "distance_km": round(dist, 2)
             })
     return {"count": len(nearby), "blackspots": nearby}
@@ -554,3 +572,65 @@ def _check_nearby_blackspots(db: Session, lat: float, lon: float) -> HotspotInpu
                 report_count=len(nearby)
             )
     return None
+
+
+# ─── Permanent Hotspots (Direct DB Read) ─────────────────────────────────
+
+@router.get("/hotspots", response_model=HotspotsListResponse)
+async def get_hotspots(db: Session = Depends(get_db)):
+    """Get permanent accident hotspots directly from the database."""
+    try:
+        rows = db.query(PermanentHotspot).all()
+        hotspots = [
+            HotspotItem(
+                id=h.id,
+                name=h.name or "Unknown",
+                latitude=h.latitude,
+                longitude=h.longitude,
+                report_count=h.report_count or 0,
+                risk_boost=h.risk_boost or 0.0,
+                created_at=str(h.first_reported) if h.first_reported else None,
+            )
+            for h in rows
+        ]
+        return HotspotsListResponse(count=len(hotspots), hotspots=hotspots)
+    except Exception as e:
+        logger.error(f"Failed to fetch hotspots: {e}")
+        return HotspotsListResponse(count=0, hotspots=[])
+
+
+# ─── Accident Reports (Police Reporting) ─────────────────────────────────
+
+@router.post("/accident-report", response_model=AccidentReportResponse)
+async def submit_accident_report(
+    user_id: str,
+    data: AccidentReportCreate,
+    db: Session = Depends(get_db),
+):
+    """Submit a police/accident report at the current GPS location."""
+    report = AccidentReport(
+        user_id=user_id,
+        latitude=data.latitude,
+        longitude=data.longitude,
+        severity=data.severity,
+        description=data.description,
+        vehicles_involved=data.vehicles_involved,
+        injuries=data.injuries,
+        police_notified=data.police_notified,
+    )
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    return AccidentReportResponse(
+        id=report.id,
+        user_id=report.user_id,
+        latitude=report.latitude,
+        longitude=report.longitude,
+        severity=report.severity,
+        description=report.description,
+        vehicles_involved=report.vehicles_involved,
+        injuries=report.injuries,
+        police_notified=report.police_notified,
+        status=report.status,
+        created_at=str(report.created_at),
+    )
