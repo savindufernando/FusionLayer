@@ -50,12 +50,7 @@ export default function Header() {
         <header className="header">
             <div className="header-left">
                 <div className="logo-icon">
-                    <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-                        <circle cx="16" cy="16" r="14" stroke="var(--accent-primary)" strokeWidth="2.5" fill="none" />
-                        <circle cx="16" cy="16" r="8" fill="var(--accent-primary)" opacity="0.15" />
-                        <circle cx="16" cy="16" r="4" fill="var(--accent-primary)" />
-                        <path d="M16 2 L16 6 M16 26 L16 30 M2 16 L6 16 M26 16 L30 16" stroke="var(--accent-primary)" strokeWidth="1.5" />
-                    </svg>
+                    <img src="/logo.png" alt="DriveGuard Logo" style={{ width: '100%', height: '100%', borderRadius: '8px' }} />
                 </div>
                 <div>
                     <h1 className="logo-title">DriveGuard</h1>
