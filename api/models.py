@@ -165,3 +165,37 @@ class InsuranceClaim(Base):
     status = Column(String(50), default="DRAFT")  # DRAFT, SUBMITTED, PROCESSING, SETTLED
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     submitted_at = Column(DateTime, nullable=True)
+
+
+# ─── Accident Reports (Police Reporting) ─────────────────────────────────
+
+class AccidentReport(Base):
+    __tablename__ = "accident_reports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    severity = Column(String(50), default="MINOR")       # MINOR, MODERATE, SEVERE, FATAL
+    description = Column(Text, nullable=True)
+    vehicles_involved = Column(Integer, default=1)
+    injuries = Column(Integer, default=0)
+    police_notified = Column(Boolean, default=False)
+    status = Column(String(50), default="REPORTED")       # REPORTED, INVESTIGATING, CLOSED
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+# ─── Permanent Hotspots (from DZ Prediction) ─────────────────────────────
+
+class PermanentHotspot(Base):
+    __tablename__ = "permanent_hotspots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=True)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    report_count = Column(Integer, default=0)
+    risk_boost = Column(Float, default=0.0)
+    first_reported = Column(DateTime, nullable=True)
+    last_reported = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True)
