@@ -381,3 +381,47 @@ class InsuranceClaimResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ─── Hotspots (Permanent Danger Zones from DZ API) ──────────────────────
+
+class HotspotItem(BaseModel):
+    id: int
+    name: str
+    latitude: float
+    longitude: float
+    report_count: int = 0
+    risk_boost: float = 0.0
+    created_at: Optional[str] = None
+
+class HotspotsListResponse(BaseModel):
+    count: int
+    hotspots: List[HotspotItem]
+
+
+# ─── Accident Reports (Police Reporting) ─────────────────────────────────
+
+class AccidentReportCreate(BaseModel):
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
+    severity: str = Field(default="MINOR")       # MINOR, MODERATE, SEVERE, FATAL
+    description: Optional[str] = None
+    vehicles_involved: int = Field(default=1, ge=1)
+    injuries: int = Field(default=0, ge=0)
+    police_notified: bool = False
+
+class AccidentReportResponse(BaseModel):
+    id: int
+    user_id: str
+    latitude: float
+    longitude: float
+    severity: str
+    description: Optional[str]
+    vehicles_involved: int
+    injuries: int
+    police_notified: bool
+    status: str
+    created_at: str
+
+    class Config:
+        from_attributes = True
