@@ -46,6 +46,7 @@ PUBLIC_PATHS = {
 # Prefixes that never require an API key
 PUBLIC_PREFIXES = (
     "/api/health",
+    "/api/mobile",       # Flutter app endpoints (no API key needed)
     "/dashboard",
     "/assets",
     "/ws",
