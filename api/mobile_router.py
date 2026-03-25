@@ -454,7 +454,7 @@ async def file_claim(
     db: Session = Depends(get_db)
 ):
     """File an insurance claim with pre-crash telemetry."""
-    # Look up the most recent telemetry for pre-crash data
+    # Look up the most recent telemetry for pre-crash data (most accurate source)
     pre_crash_speed = None
     pre_crash_risk = None
     weather = None
@@ -467,6 +467,13 @@ async def file_claim(
         if latest_point:
             pre_crash_speed = latest_point.speed_kph
             pre_crash_risk = latest_point.risk_score
+
+    # Fallback to client-provided snapshot if telemetry not available
+    # (e.g. drive not started, or brief connectivity loss at moment of impact)
+    if pre_crash_speed is None:
+        pre_crash_speed = data.pre_crash_speed_kph
+    if pre_crash_risk is None:
+        pre_crash_risk = data.pre_crash_risk_score
 
     claim = InsuranceClaim(
         user_id=user_id,
