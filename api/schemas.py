@@ -363,6 +363,9 @@ class InsuranceClaimCreate(BaseModel):
     longitude: float = Field(..., ge=-180, le=180)
     statement: Optional[str] = None
     photo_urls: Optional[List[str]] = None
+    # Client-side pre-crash snapshot (optional — server fills from telemetry if absent)
+    pre_crash_speed_kph: Optional[float] = None
+    pre_crash_risk_score: Optional[float] = None
 
 class InsuranceClaimResponse(BaseModel):
     id: str
