@@ -49,6 +49,12 @@ from .database import init_db
 from .mobile_router import router as mobile_router, init_mobile_router
 
 from src.fusion_engine import FusionEngine, TSRInput, DZInput, HotspotInput
+try:
+    from src.routing_engine import RoutingEngine
+    ROUTING_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Could not import RoutingEngine: {e}")
+    ROUTING_AVAILABLE = False
 
 
 # ─── Globals ──────────────────────────────────────────────────────────────
@@ -60,6 +66,7 @@ logger = logging.getLogger("fusion_api")
 # Circuit breakers for external module calls
 cb_dz = CircuitBreaker("dz_module", failure_threshold=3, recovery_timeout=30)
 cb_tsr = CircuitBreaker("tsr_module", failure_threshold=3, recovery_timeout=30)
+routing_engine = None
 
 
 # WebSocket connection manager
@@ -142,6 +149,16 @@ async def lifespan(app: FastAPI):
     # Initialize mobile router with shared fusion engine
     init_mobile_router(engine, config)
     logger.info("Mobile API router initialized")
+    
+    global routing_engine
+    if ROUTING_AVAILABLE:
+        try:
+            db_path = str(Path(__file__).parent.parent / 'data' / 'roads_colombo.db')
+            routing_engine = RoutingEngine(db_path, engine)
+            logger.info("Routing Engine initialized successfully.")
+        except Exception as e:
+            logger.error(f"Error initializing Routing Engine: {e}")
+            routing_engine = None
     
     logger.info("Fusion Engine initialized")
     yield
@@ -371,6 +388,36 @@ async def circuit_status():
         "dz": cb_dz.get_status(),
         "tsr": cb_tsr.get_status(),
     }
+
+
+@app.get("/api/navigation/plan")
+async def plan_navigation(
+    start_lat: float, 
+    start_lon: float, 
+    end_lat: float, 
+    end_lon: float,
+    safety_weight: float = 0.8
+):
+    """
+    Calculates the Safe-Route prioritizing risk avoidance over speed.
+    """
+    if routing_engine is None:
+        raise HTTPException(status_code=503, detail="Routing engine not available")
+        
+    try:
+        route = routing_engine.calculate_safe_route(
+            start_lat=start_lat,
+            start_lon=start_lon,
+            end_lat=end_lat,
+            end_lon=end_lon,
+            safety_weight=safety_weight
+        )
+        if not route["success"]:
+            raise HTTPException(status_code=400, detail=route["message"])
+            
+        return route
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to calculate route: {str(e)}")
 
 
 @app.websocket("/api/fusion/ws")
