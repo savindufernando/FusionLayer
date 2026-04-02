@@ -36,7 +36,7 @@ buffer:
 
 # ─── Module Confidence Thresholds ────────────────────────────────────────
 # Ignore module outputs below these confidence levels
-min_tsr_confidence: 0.6         # TSR detections below this are discarded
+min_tsr_confidence: 0.45         # TSR detections below this are discarded
 min_dz_confidence: 0.3          # DZ predictions below this → uncertainty
 
 # ─── API Settings ────────────────────────────────────────────────────────
