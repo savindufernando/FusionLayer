@@ -99,6 +99,15 @@ export async function fetchHotspots(): Promise<HotspotsResponse> {
 }
 
 /**
+ * Fetch real-time active hazards (potholes, roadblocks).
+ */
+export async function fetchHazards(): Promise<any> {
+    const res = await fetch(`${DZ_BASE}/hazards`, { headers: authHeaders() });
+    if (!res.ok) throw new Error('Failed to fetch hazards');
+    return res.json();
+}
+
+/**
  * Report an accident at the given location (crowd-sourced).
  * If enough reports accumulate, the location auto-promotes to a permanent black spot.
  */
