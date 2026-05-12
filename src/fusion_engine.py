@@ -48,6 +48,7 @@ class TSRInput:
     timestamp: Optional[float] = None
     latitude: float = 0.0
     longitude: float = 0.0
+    epistemic_uncertainty: float = 0.0
 
 
 @dataclass
@@ -271,6 +272,15 @@ class FusionEngine:
         # ─── Step 1: Process TSR input through ontology ───────────────
         tsr_mass = MassFunction(source="tsr(absent)")
         tsr_contribution = {"detected": False}
+        
+        # Uncertainty-Aware Fusion check
+        if tsr_input and getattr(tsr_input, 'epistemic_uncertainty', 0.0) > 0.15:
+            reasons.append({
+                "source": "tsr_uncertainty",
+                "description": f"Ignored '{tsr_input.class_name}' due to high epistemic uncertainty ({tsr_input.epistemic_uncertainty:.3f})",
+                "impact": "decreases_confidence"
+            })
+            tsr_input = None  # Nullify to drop this uncertain evidence
         
         if tsr_input and tsr_input.is_confident and tsr_input.confidence >= self.min_tsr_confidence:
             profile = self.ontology.get_profile(tsr_input.class_id)
