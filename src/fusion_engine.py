@@ -247,6 +247,22 @@ class FusionEngine:
         now = current_time or time.time()
         timestamp = datetime.fromtimestamp(now).isoformat()
         reasons = []
+        # ─── Defensive Check: Ensure inputs are not None ──────────────
+        if dz_input is None:
+            # Create a safe neutral fallback for DZ
+            dz_input = DZInput(
+                risk_score=25.0, risk_level="LOW", confidence=0.0,
+                risk_probability=0.25, weather_condition="Unknown",
+                road_surface="Unknown", speed_kph=0
+            )
+            
+        if tsr_input is None:
+            # Create a silent fallback for TSR
+            tsr_input = TSRInput(
+                class_id=0, class_name="none", confidence=0.0,
+                is_confident=False, latitude=0.0, longitude=0.0
+            )
+
         tsr_reliability = 1.0
         tsr_discount_reasons = []
         v_status = "PLAUSIBLE"

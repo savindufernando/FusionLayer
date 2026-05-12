@@ -47,6 +47,7 @@ from .security import apply_security
 from .circuit_breaker import CircuitBreaker
 from .database import init_db
 from .mobile_router import router as mobile_router, init_mobile_router
+from .social_router import router as social_router, seed_challenges
 
 from src.fusion_engine import FusionEngine, TSRInput, DZInput, HotspotInput
 try:
@@ -150,6 +151,14 @@ async def lifespan(app: FastAPI):
     init_mobile_router(engine, config)
     logger.info("Mobile API router initialized")
     
+    # Seed driving challenges
+    from .database import SessionLocal
+    seed_db = SessionLocal()
+    try:
+        seed_challenges(seed_db)
+    finally:
+        seed_db.close()
+    
     global routing_engine
     if ROUTING_AVAILABLE:
         try:
@@ -177,10 +186,11 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-apply_security(app, module_name="fusion")
-
-# Include mobile API router
+# Include routers
 app.include_router(mobile_router)
+app.include_router(social_router)
+
+apply_security(app, module_name="fusion")
 
 # Serve dashboard static files
 dashboard_dir = Path(__file__).parent.parent / "dashboard"

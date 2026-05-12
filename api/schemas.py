@@ -323,6 +323,9 @@ class TripResponse(BaseModel):
     red_alert_count: int
     yellow_alert_count: int
     point_count: int
+    hard_brake_count: int = 0
+    harsh_corner_count: int = 0
+    safety_score: float = 100.0
 
     class Config:
         from_attributes = True
@@ -331,6 +334,29 @@ class TripResponse(BaseModel):
 class TripListResponse(BaseModel):
     count: int
     trips: List[TripResponse]
+
+
+class TelemetryPointResponse(BaseModel):
+    """A single telemetry point in a trip replay."""
+    latitude: float
+    longitude: float
+    speed_kph: float
+    heading: float
+    risk_score: float
+    risk_level: str
+    alert_level: str
+    detected_signs: Optional[List[str]] = []
+    timestamp: str
+
+    class Config:
+        from_attributes = True
+
+
+class TripDetailResponse(BaseModel):
+    """Full trip detail with all telemetry points for replay."""
+    trip: TripResponse
+    points: List[TelemetryPointResponse]
+    total_points: int
 
 
 # ─── Blackspot Report ────────────────────────────────────────────────────
@@ -425,6 +451,454 @@ class AccidentReportResponse(BaseModel):
     police_notified: bool
     status: str
     created_at: str
+
+    class Config:
+        from_attributes = True
+
+
+# ─── Social: Driver Profile ──────────────────────────────────────────────
+
+class DriverProfileResponse(BaseModel):
+    id: str
+    name: str
+    email: str
+    avatar_color: str = "#00E676"
+    bio: str = ""
+    safety_score: float = 100.0
+    total_trips: int = 0
+    total_distance_km: float = 0.0
+    xp_points: int = 0
+    driver_level: int = 1
+    followers_count: int = 0
+    following_count: int = 0
+    is_following: bool = False    # Whether the requesting user follows this user
+    created_at: str = ""
+
+class ProfileUpdateRequest(BaseModel):
+    bio: Optional[str] = None
+    avatar_color: Optional[str] = None
+
+
+# ─── Social: Follow System ───────────────────────────────────────────────
+
+class FollowRequest(BaseModel):
+    follower_id: str
+    following_id: str
+
+class FollowResponse(BaseModel):
+    id: int
+    follower_id: str
+    following_id: str
+    created_at: str
+
+class FollowerListResponse(BaseModel):
+    count: int
+    users: List[DriverProfileResponse]
+
+
+# ─── Social: Trip Sharing ────────────────────────────────────────────────
+
+class ShareTripRequest(BaseModel):
+    user_id: str
+    trip_id: str
+    caption: Optional[str] = None
+
+class SharedTripResponse(BaseModel):
+    id: int
+    user_id: str
+    user_name: str = ""
+    avatar_color: str = "#00E676"
+    driver_level: int = 1
+    trip_id: str
+    caption: Optional[str] = None
+    safety_score: int = 0
+    distance_km: float = 0.0
+    duration_seconds: int = 0
+    route_polyline: Optional[List[Dict]] = None
+    like_count: int = 0
+    good_drive_count: int = 0
+    warning_count: int = 0
+    user_reaction: Optional[str] = None   # Current user's reaction if any
+    created_at: str = ""
+
+class SharedTripFeedResponse(BaseModel):
+    count: int
+    trips: List[SharedTripResponse]
+
+
+# ─── Social: Reactions ───────────────────────────────────────────────────
+
+class ReactionRequest(BaseModel):
+    user_id: str
+    shared_trip_id: int
+    reaction_type: str = Field(..., description="like, good_drive, or warning")
+
+class ReactionResponse(BaseModel):
+    id: int
+    user_id: str
+    shared_trip_id: int
+    reaction_type: str
+    created_at: str
+
+
+# ─── Social: Leaderboard ────────────────────────────────────────────────
+
+class LeaderboardEntry(BaseModel):
+    rank: int
+    user_id: str
+    name: str
+    avatar_color: str = "#00E676"
+    safety_score: float = 100.0
+    total_trips: int = 0
+    driver_level: int = 1
+    xp_points: int = 0
+
+class LeaderboardResponse(BaseModel):
+    period: str
+    count: int
+    entries: List[LeaderboardEntry]
+    user_rank: Optional[int] = None
+
+
+# ─── Social: Community Posts ─────────────────────────────────────────────
+
+class CommunityPostCreate(BaseModel):
+    user_id: str
+    post_type: str = "general"
+    content: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    extra_data: Optional[Dict] = None
+
+class CommunityPostResponse(BaseModel):
+    id: int
+    user_id: str
+    user_name: str = ""
+    avatar_color: str = "#00E676"
+    driver_level: int = 1
+    post_type: str
+    content: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    extra_data: Optional[Dict] = None
+    like_count: int = 0
+    created_at: str = ""
+
+class CommunityFeedResponse(BaseModel):
+    count: int
+    items: List[Dict]   # Mixed: shared trips + community posts
+
+
+# ─── Social: Driving Challenges ──────────────────────────────────────────
+
+class ChallengeResponse(BaseModel):
+    id: int
+    title: str
+    description: Optional[str] = None
+    icon: str = "🛡️"
+    challenge_type: str
+    target_value: int
+    xp_reward: int
+    period: str
+    is_active: bool = True
+
+class ChallengeProgressResponse(BaseModel):
+    challenge: ChallengeResponse
+    current_value: int = 0
+    completed: bool = False
+    completed_at: Optional[str] = None
+    joined_at: str = ""
+    progress_pct: float = 0.0
+
+class ChallengesListResponse(BaseModel):
+    available: List[ChallengeResponse]
+    active: List[ChallengeProgressResponse]
+    completed: List[ChallengeProgressResponse]
+
+
+# ─── Social: Shared Routes ──────────────────────────────────────────────
+
+class SharedRouteCreate(BaseModel):
+    user_id: str
+    title: str
+    description: Optional[str] = None
+    trip_id: str   # Source trip for extracting the route polyline
+
+class SharedRouteResponse(BaseModel):
+    id: int
+    user_id: str
+    user_name: str = ""
+    avatar_color: str = "#00E676"
+    title: str
+    description: Optional[str] = None
+    start_lat: float = 0.0
+    start_lon: float = 0.0
+    end_lat: float = 0.0
+    end_lon: float = 0.0
+    route_polyline: Optional[List[Dict]] = None
+    safety_score: int = 0
+    distance_km: float = 0.0
+    follower_count: int = 0
+    created_at: str = ""
+
+class SharedRoutesListResponse(BaseModel):
+    count: int
+    routes: List[SharedRouteResponse]
+
+
+# ─── Social: Nearby Drivers ─────────────────────────────────────────────
+
+class NearbyDriverResponse(BaseModel):
+    user_id: str
+    name: str
+    avatar_color: str = "#00E676"
+    driver_level: int = 1
+    safety_score: float = 100.0
+    last_active: str = ""
+    distance_km: float = 0.0
+
+
+# ─── Social: Notifications ───────────────────────────────────────────────
+
+class NotificationResponse(BaseModel):
+    id: int
+    user_id: str
+    type: str
+    title: str
+    message: Optional[str] = None
+    extra_data: Optional[Dict] = None
+    is_read: bool = False
+    created_at: str
+
+class NotificationListResponse(BaseModel):
+    unread_count: int
+    notifications: List[NotificationResponse]
+
+
+# ─── Social: Heatmap ───────────────────────────────────────────────────
+
+class HeatmapPoint(BaseModel):
+    trip_id: str
+    latitude: float
+    longitude: float
+    risk_score: float
+    alert_level: str
+
+class HeatmapResponse(BaseModel):
+    user_id: str
+    points: List[HeatmapPoint]
+
+
+# ─── Social: Trip Comparison ───────────────────────────────────────────
+
+class TripCompStats(BaseModel):
+    distance_km: float
+    avg_risk_score: float
+    red_alerts: int
+    yellow_alerts: int
+    safety_score: int
+
+class TripComparisonResponse(BaseModel):
+    trip1: TripCompStats
+    trip2: TripCompStats
+    deltas: Dict[str, float]  # Percentage improvements or raw differences
+
+
+# ─── Social: Driving Report ────────────────────────────────────────────
+
+class DrivingReportResponse(BaseModel):
+    user_id: str
+    period: str
+    total_distance: float
+    avg_safety_score: float
+    improvement_pct: float
+    report_url: Optional[str] = None
+
+
+# ─── Emergency Profile (WheelSafar-Inspired) ────────────────────────────
+
+class EmergencyProfileCreate(BaseModel):
+    full_name: str = Field(..., min_length=1, max_length=255)
+    blood_type: Optional[str] = Field(default=None, description="A+, A-, B+, B-, AB+, AB-, O+, O-")
+    allergies: Optional[str] = None
+    medical_conditions: Optional[str] = None
+    medications: Optional[str] = None
+    emergency_contact_1_name: Optional[str] = None
+    emergency_contact_1_phone: Optional[str] = None
+    emergency_contact_2_name: Optional[str] = None
+    emergency_contact_2_phone: Optional[str] = None
+    insurance_provider: Optional[str] = None
+    insurance_policy_no: Optional[str] = None
+    is_public: bool = True
+
+class EmergencyProfileResponse(BaseModel):
+    id: int
+    user_id: str
+    full_name: str
+    blood_type: Optional[str] = None
+    allergies: Optional[str] = None
+    medical_conditions: Optional[str] = None
+    medications: Optional[str] = None
+    emergency_contact_1_name: Optional[str] = None
+    emergency_contact_1_phone: Optional[str] = None
+    emergency_contact_2_name: Optional[str] = None
+    emergency_contact_2_phone: Optional[str] = None
+    insurance_provider: Optional[str] = None
+    insurance_policy_no: Optional[str] = None
+    is_public: bool = True
+    created_at: str = ""
+    updated_at: str = ""
+
+    class Config:
+        from_attributes = True
+
+
+# ─── Live Trip Sharing (WheelSafar-Inspired) ────────────────────────────
+
+class LiveTripStartRequest(BaseModel):
+    user_id: str
+    trip_id: str
+
+class LiveTripUpdateRequest(BaseModel):
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
+    speed_kph: float = Field(default=0.0, ge=0)
+    risk_level: str = "LOW"
+    alert_level: str = "GREEN"
+
+class LiveTripResponse(BaseModel):
+    id: int
+    user_id: str
+    user_name: str = ""
+    trip_id: str
+    share_code: str
+    is_active: bool = True
+    latitude: float = 0.0
+    longitude: float = 0.0
+    speed_kph: float = 0.0
+    risk_level: str = "LOW"
+    alert_level: str = "GREEN"
+    watcher_count: int = 0
+    last_updated: str = ""
+    created_at: str = ""
+
+    class Config:
+        from_attributes = True
+
+
+# ─── Quick Hazard Alerts (WheelSafar-Inspired) ──────────────────────────
+
+class QuickAlertCreate(BaseModel):
+    user_id: str
+    alert_type: str = Field(..., description="breakdown, tricky_road, accident_ahead, road_hazard, police_checkpoint")
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
+    speed_at_report: float = Field(default=0.0, ge=0)
+
+class QuickAlertResponse(BaseModel):
+    id: int
+    user_id: str
+    user_name: str = ""
+    alert_type: str
+    latitude: float
+    longitude: float
+    speed_at_report: float = 0.0
+    is_active: bool = True
+    upvote_count: int = 0
+    distance_km: float = 0.0
+    created_at: str = ""
+    expires_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class QuickAlertsNearbyResponse(BaseModel):
+    count: int
+    alerts: List[QuickAlertResponse]
+
+# ─── Ride Groups (WheelSafar-Inspired) ──────────────────────────────────
+
+class RideGroupCreate(BaseModel):
+    name: str = Field(..., max_length=255)
+    description: Optional[str] = None
+
+class RideGroupJoin(BaseModel):
+    invite_code: str = Field(..., max_length=6, min_length=6)
+
+class GroupMemberResponse(BaseModel):
+    id: int
+    group_id: int
+    user_id: str
+    user_name: str = ""
+    role: str
+    status: str
+    joined_at: str
+
+    class Config:
+        from_attributes = True
+
+class RideGroupResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    invite_code: str
+    created_at: str
+    members: List[GroupMemberResponse] = []
+
+    class Config:
+        from_attributes = True
+
+class GroupLiveLocationResponse(BaseModel):
+    group_id: int
+    group_name: str
+    active_members: List[LiveTripResponse] = []
+
+# ─── IMU Telematics (Harsh Driving Events) ──────────────────────────────
+
+class TelematicsEventRequest(BaseModel):
+    event_type: str = Field(..., description="E.g., 'hard_brake', 'harsh_corner'")
+    timestamp: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+# ─── Emergency SOS ────────────────────────────────────────────────────────
+
+class EmergencySOSRequest(BaseModel):
+    user_id: str
+    latitude: float
+    longitude: float
+    trip_id: Optional[str] = None
+    risk_snapshot: Optional[float] = None
+    speed_kph: Optional[float] = 0.0
+
+class EmergencySOSResponse(BaseModel):
+    status: str
+    event_id: str
+    notified_contacts: List[str]
+    timestamp: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+
+# ─── Digital Wallet ──────────────────────────────────────────────────────
+
+class WalletCreate(BaseModel):
+    license_no: Optional[str] = None
+    vehicle_classes: Optional[str] = None
+    license_dob: Optional[str] = None
+    blood_grp: Optional[str] = None
+    issue_date: Optional[str] = None
+    expiry_date: Optional[str] = None
+    license_pdf_url: Optional[str] = None
+    nic_name: Optional[str] = None
+    nic_no: Optional[str] = None
+    nic_gender: Optional[str] = None
+    nic_pob: Optional[str] = None
+    nic_pdf_url: Optional[str] = None
+
+class WalletResponse(WalletCreate):
+    user_id: str
+    updated_at: str
 
     class Config:
         from_attributes = True

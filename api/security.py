@@ -47,6 +47,7 @@ PUBLIC_PATHS = {
 PUBLIC_PREFIXES = (
     "/api/health",
     "/api/mobile",       # Flutter app endpoints (no API key needed)
+    "/api/social",       # Social/Community features (making public for dev)
     "/dashboard",
     "/assets",
     "/ws",
