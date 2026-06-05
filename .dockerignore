@@ -1,0 +1,28 @@
+# Virtual Environments
+venv/
+venv311/
+env/
+.env
+
+# Cache and Logs
+__pycache__/
+.pytest_cache/
+*.log
+scratch/
+evaluation/
+
+# Datasets and Large Media
+data/
+*.mp4
+*.avi
+*.png
+*.jpg
+*.jpeg
+
+# Git
+.git/
+.github/
+
+# IDE
+.vscode/
+.idea/

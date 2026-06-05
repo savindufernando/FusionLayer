@@ -99,7 +99,9 @@ class MassFunction:
         """
         committed = self.m_safe + self.m_dangerous
         if committed < 1e-10:
-            return 0.5  # Complete ignorance → uniform
+            # FIX: Road accidents are rare. Absolute ignorance shouldn't be a 50/50 coin flip.
+            # Default to a 10% base prior (Low Risk) instead of 0.5 (Medium Risk)
+            return 0.10
         
         return self.m_dangerous + self.m_uncertain * (self.m_dangerous / committed)
     
@@ -392,8 +394,10 @@ class EvidenceConstructor:
         Returns:
             MassFunction representing DZ evidence
         """
-        if dz_confidence < min_confidence:
-            return MassFunction(source="dz(low_conf)")
+        # FIX: Do not hard-drop low confidence DZ inputs.
+        # Let the DS math naturally scale the mass by the confidence score.
+        # If we drop it, the system reverts to absolute ignorance (which defaults to a hardcoded prior).
+        # We ALWAYS want the base geolocation context, even if confidence is low.
         
         # Scale evidence by confidence
         effective = dz_confidence
@@ -444,4 +448,39 @@ class EvidenceConstructor:
             m_dangerous=m_dangerous,
             m_uncertain=m_uncertain,
             source="hotspot"
+        )
+        
+    @staticmethod
+    def from_yolo(
+        hazard_class: str,
+        yolo_confidence: float
+    ) -> MassFunction:
+        """
+        Construct mass function from dynamic hazard detection (YOLO).
+        
+        Dynamic hazards (like pedestrians or dogs) carry immense immediate danger.
+        
+        Args:
+            hazard_class: Type of hazard detected
+            yolo_confidence: Confidence of the YOLO detection
+            
+        Returns:
+            MassFunction representing dynamic hazard evidence
+        """
+        high_risk_classes = {"person", "pedestrian", "dog", "cow", "elephant", "bicycle", "motorcycle", "car", "truck"}
+        
+        # High intrinsic risk for known hazards
+        base_risk = 0.90 if hazard_class.lower() in high_risk_classes else 0.50
+        
+        effective = yolo_confidence
+        
+        m_dangerous = base_risk * effective
+        m_safe = 0.0  # YOLO hazards only provide danger evidence
+        m_uncertain = 1.0 - m_dangerous
+        
+        return MassFunction(
+            m_safe=m_safe,
+            m_dangerous=m_dangerous,
+            m_uncertain=m_uncertain,
+            source=f"yolo({hazard_class})"
         )

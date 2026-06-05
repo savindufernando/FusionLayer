@@ -7,6 +7,7 @@ import RiskGauge from './components/RiskGauge';
 import VehicleTelemetry from './components/VehicleTelemetry';
 import SystemGeolocation from './components/SystemGeolocation';
 import SystemSignDetection from './components/SystemSignDetection';
+import SystemDynamicHazard from './components/SystemDynamicHazard';
 import SensorReliability from './components/SensorReliability';
 import FusionResultPanel from './components/FusionResultPanel';
 import Controls from './components/Controls';
@@ -20,6 +21,7 @@ import { generateTripReport } from './services/report';
 import { resetEngine, saveTrip } from './services/api';
 import { useVoiceCommand } from './hooks/useVoiceCommand';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useBluetooth } from './hooks/useBluetooth';
 import type { WeatherScenario, TripCreate } from './types';
 
 function App() {
@@ -27,7 +29,14 @@ function App() {
   const [showHistory, setShowHistory] = useState(false);
   const gps = useGPS();
   const dashcam = useDashcam();
-  const fusion = useRealTimeFusion(gps.vehicle, dashcam.captureFrame, weather);
+  
+  const latestSignBbox = useRef<[number, number, number, number] | null>(null);
+  
+  const captureCroppedFrame = useCallback(() => {
+    return dashcam.captureFrame(latestSignBbox.current || undefined);
+  }, [dashcam]);
+
+  const fusion = useRealTimeFusion(gps.vehicle, captureCroppedFrame, weather);
 
   const handleStart = useCallback(() => {
     gps.startTracking();
@@ -122,6 +131,9 @@ function App() {
   // Voice Alerts Integration
   const voice = useVoiceAlert();
 
+  // Bluetooth IoT Integration
+  const bt = useBluetooth();
+
   useEffect(() => {
     if (fusion.state.fusionResult) {
       const { fused_risk_score, fused_risk_level, hotspot_contribution } = fusion.state.fusionResult;
@@ -135,8 +147,17 @@ function App() {
       if (hotspot_contribution && hotspot_contribution.active) {
         voice.alertHotspot();
       }
+
+      // 3. Bluetooth LED Update
+      if (bt.isConnected) {
+        if (fused_risk_level === 'HIGH') bt.sendCommand('RED');
+        else if (fused_risk_level === 'MEDIUM') bt.sendCommand('YELLOW');
+        else bt.sendCommand('GREEN');
+      }
+    } else {
+      if (bt.isConnected) bt.sendCommand('OFF');
     }
-  }, [fusion.state.fusionResult, voice]);
+  }, [fusion.state.fusionResult, voice, bt.isConnected, bt.sendCommand]);
 
   // Voice Command Integration
   const voiceCommand = useVoiceCommand();
@@ -232,6 +253,7 @@ function App() {
             onVideoReady={handleVideoReady}
             onVideoUpload={handleVideoUpload}
             result={fusion.state.fusionResult}
+            onSignBbox={(bbox) => { latestSignBbox.current = bbox; }}
           />
           <HotspotPanel
             currentLat={gps.vehicle.lat}
@@ -269,12 +291,13 @@ function App() {
               result={fusion.state.fusionResult}
               currentSign={null}
             />
+            <SystemDynamicHazard result={fusion.state.fusionResult} />
             <SensorReliability result={fusion.state.fusionResult} />
           </div>
 
           <FusionResultPanel result={fusion.state.fusionResult} />
 
-          <Controls
+            <Controls
             isTracking={gps.vehicle.isTracking}
             isFusing={fusion.state.isRunning}
             weather={weather}
@@ -291,6 +314,8 @@ function App() {
             onExportJSON={handleExportJSON}
             hasTripData={fusion.state.tripStats.startTime !== null || fusion.state.tickCount > 10}
             onShowHistory={() => setShowHistory(true)}
+            onConnectBluetooth={bt.connect}
+            btConnected={bt.isConnected}
           />
 
           {fusion.state.error && (

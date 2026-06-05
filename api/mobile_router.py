@@ -166,85 +166,97 @@ async def mobile_analyze(request: MobileAnalyzeRequest, db: Session = Depends(ge
         _engine.reset()  # Reset fusion engine state for new trip
         logger.info(f"New trip started: {trip.id} for vehicle {vehicle.make_model}")
 
-    # ─── Call TSR Module (Perception) ───
+    # ─── Initialize Ingestion Parameters & Status ───────────────
+    tsr_url = _config.get("tsr_url", "http://localhost:8001")
+    tsr_endpoint = _config.get("tsr_endpoint", "/api/predict/base64")
+    dz_url = _config.get("dz_url", "http://localhost:8000")
+    dz_endpoint = _config.get("dz_endpoint", "/api/predict")
+    degraded = False
+
     tsr = None
     recent_hazard = "None"
-    if request.image_base64 and _cb_tsr.can_execute():
-        try:
-            tsr_resp = await client.post(
-                f"{tsr_url}{tsr_endpoint}",
-                json={"image": request.image_base64}
-            )
-            tsr_data = tsr_resp.json()
-            tsr = TSRInput(
-                class_id=tsr_data.get("class_id", 0),
-                class_name=tsr_data.get("class_name", "unknown"),
-                confidence=tsr_data.get("confidence", 0),
-                is_confident=tsr_data.get("is_confident", False),
-                latitude=request.latitude,
-                longitude=request.longitude
-            )
-            _cb_tsr.record_success()
-            
-            # Extract hazard for DZ model if confidence is high
-            if tsr.is_confident and tsr.confidence > 0.8:
-                recent_hazard = tsr.class_name
-                
-            if tsr.confidence >= 0.85:
-                # Research Fix: Estimate sign location 25m ahead of vehicle heading
-                import math
-                dist_km = 0.025 # 25 meters
-                R = 6371.0 # Earth radius
-                brng = math.radians(request.heading)
-                lat1 = math.radians(request.latitude)
-                lon1 = math.radians(request.longitude)
-                
-                lat2 = math.asin(math.sin(lat1)*math.cos(dist_km/R) + 
-                                 math.cos(lat1)*math.sin(dist_km/R)*math.cos(brng))
-                lon2 = lon1 + math.atan2(math.sin(brng)*math.sin(dist_km/R)*math.cos(lat1),
-                                         math.cos(dist_km/R)-math.sin(lat1)*math.sin(lat2))
-                
-                est_lat, est_lon = math.degrees(lat2), math.degrees(lon2)
-                _save_crowdsourced_sign(db, tsr, est_lat, est_lon)
-        except Exception as e:
-            _cb_tsr.record_failure()
-            logger.warning(f"TSR module call failed: {e}")
-            degraded = True
-
-    # ─── Call DZ Module (Reasoning) ───
     dz = None
-    if _cb_dz.can_execute():
-        try:
-            dz_resp = await client.post(
-                f"{dz_url}{dz_endpoint}",
-                json={
-                    "latitude": request.latitude,
-                    "longitude": request.longitude,
-                    "heading": request.heading,
-                    "speed_kph": request.speed_kph,
-                    "scenario": "realtime",
-                    "live_hazard": recent_hazard
-                }
-            )
-            dz_data = dz_resp.json()
-            dz = DZInput(
-                risk_score=dz_data.get("risk_score", 0),
-                risk_level=dz_data.get("risk_level", "LOW"),
-                confidence=dz_data.get("confidence", 0.5),
-                risk_probability=dz_data.get("risk_score", 0) / 100.0,
-                weather_condition=dz_data.get("weather_condition", "Fine"),
-                road_surface=dz_data.get("road_surface", "Dry"),
-                is_overspeeding=dz_data.get("is_overspeeding", False),
-                speed_deviation_kph=dz_data.get("speed_deviation_kph", 0),
-                speed_kph=request.speed_kph,
-                reasons=dz_data.get("reasons", [])
-            )
-            _cb_dz.record_success()
-        except Exception as e:
-            _cb_dz.record_failure()
-            logger.error(f"DZ module call failed: {e}")
 
-    # DZ fallback (Ensure dz is never None even if module is disabled/fails)
+    # ─── Asynchronous Client Context for External Module Calls ───
+    headers = {"x-api-key": os.getenv("DG_API_KEY", "")}
+    async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
+        # 1. Call TSR Module (Perception) if image provided
+        if request.image_base64 and _cb_tsr.can_execute():
+            try:
+                tsr_resp = await client.post(
+                    f"{tsr_url}{tsr_endpoint}",
+                    json={"image": request.image_base64, "is_cropped": request.is_cropped}
+                )
+                tsr_data = tsr_resp.json()
+                tsr = TSRInput(
+                    class_id=tsr_data.get("class_id", 0),
+                    class_name=tsr_data.get("class_name", "unknown"),
+                    confidence=tsr_data.get("confidence", 0),
+                    is_confident=tsr_data.get("is_confident", False),
+                    latitude=request.latitude,
+                    longitude=request.longitude,
+                    bbox=tsr_data.get("bbox")
+                )
+                _cb_tsr.record_success()
+                
+                # Extract hazard for DZ model if confidence is high
+                if tsr.is_confident and tsr.confidence > 0.8:
+                    recent_hazard = tsr.class_name
+                    
+                if tsr.confidence >= 0.85:
+                    # Estimate sign location 25m ahead of vehicle heading
+                    import math
+                    dist_km = 0.025 # 25 meters
+                    R = 6371.0 # Earth radius
+                    brng = math.radians(request.heading)
+                    lat1 = math.radians(request.latitude)
+                    lon1 = math.radians(request.longitude)
+                    
+                    lat2 = math.asin(math.sin(lat1)*math.cos(dist_km/R) + 
+                                     math.cos(lat1)*math.sin(dist_km/R)*math.cos(brng))
+                    lon2 = lon1 + math.atan2(math.sin(brng)*math.sin(dist_km/R)*math.cos(lat1),
+                                             math.cos(dist_km/R)-math.sin(lat1)*math.sin(lat2))
+                    
+                    est_lat, est_lon = math.degrees(lat2), math.degrees(lon2)
+                    _save_crowdsourced_sign(db, tsr, est_lat, est_lon)
+            except Exception as e:
+                _cb_tsr.record_failure()
+                logger.warning(f"TSR module call failed: {e}")
+                degraded = True
+
+        # 2. Call DZ Module (Reasoning)
+        if _cb_dz.can_execute():
+            try:
+                dz_resp = await client.post(
+                    f"{dz_url}{dz_endpoint}",
+                    json={
+                        "latitude": request.latitude,
+                        "longitude": request.longitude,
+                        "heading": request.heading,
+                        "speed_kph": request.speed_kph,
+                        "scenario": "realtime",
+                        "live_hazard": recent_hazard
+                    }
+                )
+                dz_data = dz_resp.json()
+                dz = DZInput(
+                    risk_score=dz_data.get("risk_score", 0),
+                    risk_level=dz_data.get("risk_level", "LOW"),
+                    confidence=dz_data.get("confidence", 0.5),
+                    risk_probability=dz_data.get("risk_score", 0) / 100.0,
+                    weather_condition=dz_data.get("weather_condition", "Fine"),
+                    road_surface=dz_data.get("road_surface", "Dry"),
+                    is_overspeeding=dz_data.get("is_overspeeding", False),
+                    speed_deviation_kph=dz_data.get("speed_deviation_kph", 0),
+                    speed_kph=request.speed_kph,
+                    reasons=dz_data.get("reasons", [])
+                )
+                _cb_dz.record_success()
+            except Exception as e:
+                _cb_dz.record_failure()
+                logger.error(f"DZ module call failed: {e}")
+
+    # ─── DZ Fallback ────────────────────────────────────────────
     if dz is None:
         degraded = True
         speed = request.speed_kph
@@ -259,38 +271,12 @@ async def mobile_analyze(request: MobileAnalyzeRequest, db: Session = Depends(ge
                       "description": "DZ module unavailable — speed-based estimate"}]
         )
 
-        # ── Call TSR Module (only if camera frame is provided) ──
-        tsr = None
-        if request.image_base64 and _cb_tsr.can_execute():
-            try:
-                tsr_resp = await client.post(
-                    f"{tsr_url}{tsr_endpoint}",
-                    json={"image": request.image_base64}
-                )
-                tsr_data = tsr_resp.json()
-                tsr = TSRInput(
-                    class_id=tsr_data.get("class_id", 0),
-                    class_name=tsr_data.get("class_name", "unknown"),
-                    confidence=tsr_data.get("confidence", 0),
-                    is_confident=tsr_data.get("is_confident", False),
-                    latitude=request.latitude,
-                    longitude=request.longitude
-                )
-                _cb_tsr.record_success()
-
-                # ── TSR Virtualization: Save detected sign to cloud map ──
-                if tsr.confidence >= 0.85:
-                    _save_crowdsourced_sign(db, tsr, request.latitude, request.longitude)
-            except Exception as e:
-                _cb_tsr.record_failure()
-                logger.warning(f"TSR module call failed: {e}")
-                degraded = True
-        elif not request.image_base64:
-            # ── TSR Virtualization: Check cloud sign map for this location ──
-            virtual_tsr = _lookup_virtual_sign(db, request.latitude, request.longitude)
-            if virtual_tsr:
-                tsr = virtual_tsr
-                logger.debug(f"Virtual TSR: {tsr.class_name} from cloud sign map")
+    # ─── TSR Virtualization (Always run if no active visual sign) ───
+    if tsr is None:
+        virtual_tsr = _lookup_virtual_sign(db, request.latitude, request.longitude)
+        if virtual_tsr:
+            tsr = virtual_tsr
+            logger.debug(f"Virtual TSR: {tsr.class_name} from cloud sign map")
 
     # ── Check nearby blackspots (System 1) ───────────────────
     hotspot = _check_nearby_blackspots(db, request.latitude, request.longitude)

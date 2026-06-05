@@ -88,7 +88,7 @@ export function useDashcam() {
      * Capture the current camera frame as a base64 JPEG string.
      * Returns null if camera isn't active.
      */
-    const captureFrame = useCallback((): string | null => {
+    const captureFrame = useCallback((bbox?: [number, number, number, number]): string | null => {
         if (!videoRef.current || !canvasRef.current || !isActive) return null;
 
         const video = videoRef.current;
@@ -96,7 +96,23 @@ export function useDashcam() {
         const ctx = canvas.getContext('2d');
         if (!ctx) return null;
 
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        if (bbox) {
+            const [x, y, width, height] = bbox;
+            // Pad slightly for better context
+            const pad = 10;
+            const cx = Math.max(0, x - pad);
+            const cy = Math.max(0, y - pad);
+            const cw = Math.min(width + pad * 2, video.videoWidth - cx);
+            const ch = Math.min(height + pad * 2, video.videoHeight - cy);
+            
+            canvas.width = cw;
+            canvas.height = ch;
+            ctx.drawImage(video, cx, cy, cw, ch, 0, 0, cw, ch);
+        } else {
+            canvas.width = 640;
+            canvas.height = 480;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        }
 
         // Convert to base64 JPEG (remove the data:image/jpeg;base64, prefix)
         const dataUrl = canvas.toDataURL('image/jpeg', 0.6);

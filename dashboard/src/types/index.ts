@@ -25,6 +25,7 @@ export interface AutoPredictRequest {
     speed_kph: number;
     scenario: string;
     image_base64?: string | null;
+    is_cropped?: boolean;
 }
 
 export interface FusionReason {
@@ -63,11 +64,18 @@ export interface FusedPredictionResponse {
         base_modifier?: number;
         effective_modifier?: number;
         aggregate?: Record<string, unknown>;
+        bbox?: number[];
     };
     hotspot_contribution: {
         active: boolean;
         risk_boost?: number;
         report_count?: number;
+    };
+    yolo_contribution: {
+        detected: boolean;
+        hazard_class?: string;
+        confidence?: number;
+        mass_function?: Record<string, number>;
     };
     fusion_reasons: FusionReason[];
     active_signs: ActiveSign[];

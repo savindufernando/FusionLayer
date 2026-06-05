@@ -332,7 +332,7 @@ async def fused_predict_auto(request: FusedPredictionRequest):
             try:
                 tsr_response = await client.post(
                     f"{tsr_url}{tsr_endpoint}",
-                    json={"image": request.image_base64}
+                    json={"image": request.image_base64, "is_cropped": request.is_cropped}
                 )
                 tsr_data = tsr_response.json()
                 
@@ -342,7 +342,8 @@ async def fused_predict_auto(request: FusedPredictionRequest):
                     confidence=tsr_data.get("confidence", 0),
                     is_confident=tsr_data.get("is_confident", False),
                     latitude=request.latitude,
-                    longitude=request.longitude
+                    longitude=request.longitude,
+                    bbox=tsr_data.get("bbox")
                 )
                 cb_tsr.record_success()
             except Exception as e:
@@ -351,9 +352,20 @@ async def fused_predict_auto(request: FusedPredictionRequest):
         elif request.image_base64 and not cb_tsr.can_execute():
             logger.warning("TSR circuit breaker OPEN — skipping TSR")
             degraded = True
+            
+        # ─── Parse YOLO Edge Detections ──────────────────────────────
+        yolo_input = None
+        if request.yolo_detections:
+            best_det = max(request.yolo_detections, key=lambda x: x.confidence)
+            from src.fusion_engine import YOLOInput
+            yolo_input = YOLOInput(
+                has_hazard=True,
+                hazard_class=best_det.hazard_class,
+                confidence=best_det.confidence
+            )
     
     # Fuse
-    result = engine.fuse(dz_input=dz, tsr_input=tsr)
+    result = engine.fuse(dz_input=dz, tsr_input=tsr, yolo_input=yolo_input)
     response = _result_to_response(result)
     
     # Add degraded flag if any module was unavailable
@@ -531,6 +543,7 @@ def _result_to_response(result) -> FusedPredictionResponse:
         dz_contribution=result.dz_contribution,
         tsr_contribution=result.tsr_contribution,
         hotspot_contribution=result.hotspot_contribution,
+        yolo_contribution=result.yolo_contribution,
         tsr_reliability=result.tsr_reliability,
         tsr_discount_reasons=result.tsr_discount_reasons,
         validation_status=result.validation_status,

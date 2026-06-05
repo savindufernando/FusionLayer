@@ -154,9 +154,9 @@ class TestMassFunction:
         assert p > 0.5
     
     def test_pignistic_ignorance(self):
-        """Complete ignorance → pignistic = 0.5."""
+        """Complete ignorance → pignistic = 0.1 (low risk base prior)."""
         m = MassFunction(m_safe=0.0, m_dangerous=0.0, m_uncertain=1.0)
-        assert abs(m.pignistic_probability - 0.5) < 1e-6
+        assert abs(m.pignistic_probability - 0.1) < 1e-6
     
     def test_pignistic_full_danger(self):
         """Full danger evidence → pignistic ≈ 1.0."""
@@ -299,9 +299,9 @@ class TestEvidenceConstructor:
         assert m.m_safe > 0.6
     
     def test_dz_low_confidence(self):
-        """Low DZ confidence → ignorance."""
+        """Low DZ confidence → scaled mass with high uncertainty."""
         m = EvidenceConstructor.from_dz(risk_probability=0.8, dz_confidence=0.1)
-        assert m.m_uncertain >= 0.99
+        assert m.m_uncertain >= 0.89
     
     def test_hotspot_active(self):
         """Active hotspot → danger-only evidence."""

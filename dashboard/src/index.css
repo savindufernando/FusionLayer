@@ -486,6 +486,11 @@ body {
   color: var(--accent-secondary);
 }
 
+.system-badge.yolo {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
 .system-status {
   font-size: 11px;
   font-weight: 600;

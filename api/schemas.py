@@ -13,6 +13,12 @@ class FusionRiskLevel(str, Enum):
     HIGH = "HIGH"
 
 
+class YOLODetection(BaseModel):
+    """A dynamic hazard detection from the mobile app's edge YOLO model."""
+    hazard_class: str
+    confidence: float = Field(..., ge=0, le=1)
+
+
 # ─── Request Models ───────────────────────────────────────────────────────
 
 class FusedPredictionRequest(BaseModel):
@@ -23,6 +29,8 @@ class FusedPredictionRequest(BaseModel):
     speed_kph: float = Field(default=40.0, ge=0, le=200, description="Vehicle speed (km/h)")
     scenario: str = Field(default="sunny", description="Weather scenario override")
     image_base64: Optional[str] = Field(default=None, description="Camera frame as base64 JPEG/PNG")
+    is_cropped: bool = Field(default=False, description="True if the image is already cropped to the sign")
+    yolo_detections: Optional[List[YOLODetection]] = Field(default=None, description="Dynamic hazards detected on edge")
     
     class Config:
         json_schema_extra = {
@@ -117,7 +125,8 @@ class TSRContributionResponse(BaseModel):
     risk_category: Optional[str] = None
     base_modifier: Optional[float] = None
     effective_modifier: Optional[float] = None
-    aggregate: Optional[Dict] = None
+    aggregate: Optional[Dict[str, Any]] = None
+    bbox: Optional[List[int]] = None
 
 
 class FusedPredictionResponse(BaseModel):
@@ -138,6 +147,7 @@ class FusedPredictionResponse(BaseModel):
     dz_contribution: Dict
     tsr_contribution: Dict
     hotspot_contribution: Dict
+    yolo_contribution: Dict
     
     # Situational Reliability (SRD Novelty)
     tsr_reliability: float = Field(default=1.0, ge=0.1, le=1.0)
@@ -258,6 +268,8 @@ class MobileAnalyzeRequest(BaseModel):
     heading: float = Field(default=0.0, ge=0, le=360)
     speed_kph: float = Field(default=0.0, ge=0, le=250)
     image_base64: Optional[str] = Field(default=None, description="Camera frame (JPEG base64)")
+    is_cropped: bool = Field(default=False, description="True if the image is already cropped to the sign")
+    yolo_detections: Optional[List[YOLODetection]] = Field(default=None, description="Edge detected hazards")
 
 
 class MobileAnalyzeResponse(BaseModel):

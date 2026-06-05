@@ -18,6 +18,8 @@ interface ControlsProps {
     onExportJSON?: () => void;
     hasTripData?: boolean;
     onShowHistory?: () => void;
+    onConnectBluetooth?: () => void;
+    btConnected?: boolean;
 }
 
 export default function Controls({
@@ -37,6 +39,8 @@ export default function Controls({
     onExportJSON,
     hasTripData,
     onShowHistory,
+    onConnectBluetooth,
+    btConnected,
 }: ControlsProps) {
     return (
         <div className="card controls-card">
@@ -102,14 +106,25 @@ export default function Controls({
                     </div>
                 )}
 
-                {/* History Button */}
-                <div className="controls-row" style={{ marginTop: '0.5rem' }}>
-                    <button className="btn btn-outline" onClick={onShowHistory} style={{ width: '100%', borderColor: 'var(--border-color)', color: 'var(--text-secondary)' }}>
+                {/* History & Bluetooth Buttons */}
+                <div className="controls-row" style={{ marginTop: '0.5rem', gap: '0.5rem' }}>
+                    <button className="btn btn-outline" onClick={onShowHistory} style={{ flex: 1, borderColor: 'var(--border-color)', color: 'var(--text-secondary)' }}>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '8px' }}>
                             <circle cx="12" cy="12" r="10"></circle>
                             <polyline points="12 6 12 12 16 14"></polyline>
                         </svg>
                         Driver History
+                    </button>
+                    {/* The Bluetooth connect logic is passed down from App via a new prop */}
+                    <button id="bt-connect-btn" className="btn btn-outline" onClick={onConnectBluetooth} style={{ flex: 1, borderColor: btConnected ? '#10b981' : '#3b82f6', color: btConnected ? '#10b981' : '#3b82f6' }}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '8px' }}>
+                            {btConnected ? (
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                            ) : (
+                                <polyline points="6.5 6.5 17.5 17.5 12 23 12 1 17.5 6.5 6.5 17.5" />
+                            )}
+                        </svg>
+                        {btConnected ? 'LED Connected' : 'Connect LED'}
                     </button>
                 </div>
 

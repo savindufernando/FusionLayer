@@ -101,17 +101,18 @@ export function useRealTimeFusion(
     }, []);
 
     const updateStateWithResult = useCallback((result: FusedPredictionResponse, v: VehicleState) => {
-        const newTrailPoint: TrailPoint = {
+        const hasValidGPS = v.lat !== 0 || v.lng !== 0;
+        const newTrailPoint: TrailPoint | null = hasValidGPS ? {
             lat: v.lat,
             lng: v.lng,
             risk: result.fused_risk_score,
             level: result.fused_risk_level,
-        };
+        } : null;
 
         setState(prev => {
             // Calculate distance from last point
             let dist = 0;
-            if (prev.fullHistory.length > 0) {
+            if (hasValidGPS && prev.fullHistory.length > 0) {
                 const last = prev.fullHistory[prev.fullHistory.length - 1];
                 dist = calcDistance(last.lat, last.lng, v.lat, v.lng);
             }
@@ -120,7 +121,7 @@ export function useRealTimeFusion(
             const newAvgRisk = ((prev.tripStats.avgRisk * prev.tripStats.riskSamples) + result.fused_risk_score) / (prev.tripStats.riskSamples + 1);
 
             const newEvents = [...prev.tripStats.highRiskEvents];
-            if (result.fused_risk_level === 'HIGH' || result.fused_risk_score > 60) {
+            if ((result.fused_risk_level === 'HIGH' || result.fused_risk_score > 60) && hasValidGPS) {
                 const lastEvent = newEvents.length > 0 ? newEvents[newEvents.length - 1] : null;
                 const timeSinceLast = lastEvent ? Date.now() - lastEvent.time : 99999;
                 if (timeSinceLast > 10000) {
@@ -137,8 +138,8 @@ export function useRealTimeFusion(
             return {
                 ...prev,
                 fusionResult: result,
-                trail: [...prev.trail.slice(-100), newTrailPoint],
-                fullHistory: [...prev.fullHistory, newTrailPoint],
+                trail: newTrailPoint ? [...prev.trail.slice(-100), newTrailPoint] : prev.trail,
+                fullHistory: newTrailPoint ? [...prev.fullHistory, newTrailPoint] : prev.fullHistory,
                 tripStats: {
                     ...prev.tripStats,
                     distanceKm: prev.tripStats.distanceKm + dist,
@@ -160,13 +161,15 @@ export function useRealTimeFusion(
         if (!isRunningRef.current) return;
 
         const v = vehicleRef.current;
-        if (v.lat === 0 && v.lng === 0) {
+        const frame = captureRef.current();
+
+        // If we have no GPS coordinates and also no captured camera frame, reschedule.
+        if (v.lat === 0 && v.lng === 0 && !frame) {
             // Reschedule if no GPS yet
             intervalRef.current = setTimeout(tick, 1000);
             return;
         }
 
-        const frame = captureRef.current();
         const request: AutoPredictRequest = {
             latitude: v.lat,
             longitude: v.lng,
@@ -174,6 +177,7 @@ export function useRealTimeFusion(
             speed_kph: v.speed,
             scenario: weatherRef.current,
             image_base64: frame || undefined,
+            is_cropped: !!frame,
         };
 
         try {

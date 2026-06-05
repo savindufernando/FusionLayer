@@ -44,4 +44,21 @@ def get_db():
 def init_db():
     """Create all database tables that don't already exist."""
     from . import models  # noqa: F401 — import to register models
-    Base.metadata.create_all(bind=engine)
+    import sys
+    from sqlalchemy.exc import OperationalError
+    
+    try:
+        Base.metadata.create_all(bind=engine)
+    except OperationalError as e:
+        print("\n" + "="*70)
+        print("🚨 DATABASE CONNECTION ERROR 🚨")
+        print("="*70)
+        print("FusionLayer could not connect to your MySQL database.")
+        print("It looks like your XAMPP MySQL server is currently turned OFF.")
+        print("\nHow to fix:")
+        print("1. Open your XAMPP Control Panel.")
+        print("2. Click 'Start' next to MySQL.")
+        print("3. Wait until the background turns green.")
+        print("4. Try running this server again!")
+        print("="*70 + "\n")
+        sys.exit(1)

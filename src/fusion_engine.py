@@ -48,6 +48,7 @@ class TSRInput:
     timestamp: Optional[float] = None
     latitude: float = 0.0
     longitude: float = 0.0
+    bbox: Optional[List[int]] = None
     epistemic_uncertainty: float = 0.0
 
 
@@ -72,6 +73,15 @@ class HotspotInput:
     """Input from crowdsourced accident reporting."""
     risk_boost: float = 0.0
     report_count: int = 0
+
+
+@dataclass
+class YOLOInput:
+    """Input from the dynamic hazard detection module (YOLO)."""
+    has_hazard: bool
+    hazard_class: str
+    confidence: float
+    timestamp: Optional[float] = None
 
 
 @dataclass
@@ -100,6 +110,7 @@ class FusionResult:
     dz_contribution: Dict = field(default_factory=dict)
     tsr_contribution: Dict = field(default_factory=dict)
     hotspot_contribution: Dict = field(default_factory=dict)
+    yolo_contribution: Dict = field(default_factory=dict)
     
     # Situational Reliability (SRD Novelty)
     tsr_reliability: float = 1.0
@@ -161,7 +172,7 @@ class FusionEngine:
         )
         
         # Thresholds
-        self.min_tsr_confidence = self.config.get("min_tsr_confidence", 0.6)
+        self.min_tsr_confidence = self.config.get("min_tsr_confidence", 0.20)
         self.min_dz_confidence = self.config.get("min_dz_confidence", 0.4)
         
         # NSLV Novelty
@@ -212,7 +223,7 @@ class FusionEngine:
             "sign_decay_lambda": 0.05,
             "buffer_max_signs": 20,
             "buffer_max_age_seconds": 60,
-            "min_tsr_confidence": 0.6,
+            "min_tsr_confidence": 0.20,
             "min_dz_confidence": 0.3,
             "threshold_high": 65.0,
             "threshold_medium": 35.0,
@@ -224,6 +235,7 @@ class FusionEngine:
         dz_input: DZInput,
         tsr_input: Optional[TSRInput] = None,
         hotspot_input: Optional[HotspotInput] = None,
+        yolo_input: Optional[YOLOInput] = None,
         current_time: Optional[float] = None
     ) -> FusionResult:
         """
@@ -325,7 +337,8 @@ class FusionEngine:
                     "confidence": round(tsr_input.confidence, 3),
                     "risk_category": profile.risk_category.value,
                     "base_modifier": round(profile.base_risk_modifier, 3),
-                    "effective_modifier": round(effective_modifier, 3)
+                    "effective_modifier": round(effective_modifier, 3),
+                    "bbox": tsr_input.bbox
                 }
                 
                 if effective_modifier > 0.2:
@@ -472,12 +485,35 @@ class FusionEngine:
                 "impact": "increases_risk"
             })
         
+        # ─── Step 4.5: Construct YOLO mass function ───────────────────────
+        yolo_mass = MassFunction(source="yolo(none)")
+        yolo_contribution = {"detected": False}
+        
+        if yolo_input and yolo_input.has_hazard:
+            yolo_mass = EvidenceConstructor.from_yolo(
+                hazard_class=yolo_input.hazard_class,
+                yolo_confidence=yolo_input.confidence
+            )
+            yolo_contribution = {
+                "detected": True,
+                "hazard_class": yolo_input.hazard_class,
+                "confidence": yolo_input.confidence,
+                "mass_function": yolo_mass.to_dict()
+            }
+            reasons.append({
+                "source": "yolo",
+                "description": f"Dynamic Hazard Detected: '{yolo_input.hazard_class}' (confidence: {yolo_input.confidence:.0%})",
+                "impact": "critical_risk"
+            })
+            
         # ─── Step 5: Combine evidence via Dempster's Rule ─────────────
         mass_functions = [dz_mass]
         if tsr_mass.m_uncertain < 0.999:  # TSR has actual evidence
             mass_functions.append(tsr_mass)
         if hotspot_mass.m_uncertain < 0.999:  # Hotspot has evidence
             mass_functions.append(hotspot_mass)
+        if yolo_mass.m_uncertain < 0.999:  # YOLO has evidence
+            mass_functions.append(yolo_mass)
         
         fused_mass, conflicts = combine_multiple(mass_functions)
         
@@ -537,6 +573,7 @@ class FusionEngine:
             dz_contribution=dz_contribution,
             tsr_contribution=tsr_contribution,
             hotspot_contribution=hotspot_contribution,
+            yolo_contribution=yolo_contribution,
             tsr_reliability=round(tsr_reliability, 3),
             tsr_discount_reasons=tsr_discount_reasons,
             validation_status=v_status,

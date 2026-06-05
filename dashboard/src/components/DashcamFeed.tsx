@@ -1,5 +1,10 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
+import * as tf from '@tensorflow/tfjs';
+import * as cocoSsd from '@tensorflow-models/coco-ssd';
 import type { FusedPredictionResponse } from '../types';
+import { YoloEdgeModel, type YoloPrediction } from '../services/yolo';
+
+const VEHICLE_CLASSES = ['car', 'motorcycle', 'bus', 'truck', 'bicycle'];
 
 interface Props {
     isActive: boolean;
@@ -7,19 +12,260 @@ interface Props {
     onVideoReady: (video: HTMLVideoElement) => void;
     onVideoUpload?: (file: File, video: HTMLVideoElement) => void;
     result: FusedPredictionResponse | null;
+    onSignBbox?: (bbox: [number, number, number, number] | null) => void;
 }
 
-export default function DashcamFeed({ isActive, error, onVideoReady, onVideoUpload, result }: Props) {
+export default function DashcamFeed({ isActive, error, onVideoReady, onVideoUpload, result, onSignBbox }: Props) {
     const videoRef = useRef<HTMLVideoElement>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
     const readyFired = useRef(false);
+    const yoloModelRef = useRef<YoloEdgeModel | null>(null);
+    
+    const [modelError, setModelError] = useState<string | null>(null);
+    const [yoloCount, setYoloCount] = useState<number>(0);
+    const cocoModelRef = useRef<cocoSsd.ObjectDetection | null>(null);
+    
+    const [isModelLoaded, setIsModelLoaded] = useState(false);
+    const latestResult = useRef(result);
+
+    useEffect(() => {
+        latestResult.current = result;
+    }, [result]);
 
     useEffect(() => {
         if (videoRef.current && !readyFired.current) {
             readyFired.current = true;
             onVideoReady(videoRef.current);
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        
+        const initModel = async () => {
+            try {
+                await tf.ready();
+                
+                let yolo: YoloEdgeModel | null = null;
+                let coco: cocoSsd.ObjectDetection | null = null;
+                
+                try {
+                    coco = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+                } catch (e) {
+                    console.error("Failed to load COCO-SSD", e);
+                }
+
+                try {
+                    const m = new YoloEdgeModel();
+                    await m.load();
+                    yolo = m;
+                } catch (e: any) {
+                    console.warn("YOLOv8 failed to load, skipping traffic signs.", e);
+                    setModelError(e.message || String(e));
+                }
+                
+                yoloModelRef.current = yolo;
+                cocoModelRef.current = coco;
+                setIsModelLoaded(true);
+                console.log("Edge AI visualizer models loaded in browser");
+            } catch (err) {
+                console.error("Failed to load edge models", err);
+                setIsModelLoaded(true); // Always set true so at least the feed works
+            }
+        };
+
+        initModel();
     }, []);
+
+    useEffect(() => {
+        let animationId: number;
+        const detectFrame = async () => {
+            if (videoRef.current && canvasRef.current && isModelLoaded && isActive && videoRef.current.readyState >= 2) {
+                const video = videoRef.current;
+                const canvas = canvasRef.current;
+                
+                canvas.width = video.clientWidth;
+                canvas.height = video.clientHeight;
+                
+                const ctx = canvas.getContext('2d');
+                if (ctx && video.videoWidth > 0 && video.videoHeight > 0) {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    
+                    try {
+                        const yoloPromise = yoloModelRef.current ? yoloModelRef.current.detect(video) : Promise.resolve([]);
+                        const cocoPromise = cocoModelRef.current ? cocoModelRef.current.detect(video) : Promise.resolve([]);
+                        
+                        const [yoloPredictions, cocoPredictions] = await Promise.all([yoloPromise, cocoPromise]);
+                        
+                        let signDetectedBbox: [number, number, number, number] | null = null;
+                        
+                        // Process YOLO Predictions (Traffic Signs)
+                        if (yoloPredictions.length > 0) {
+                            // console.log("YOLO Predictions:", yoloPredictions); // Uncomment to debug
+                        }
+                        setYoloCount(yoloPredictions.length);
+                        yoloPredictions.forEach((prediction: YoloPrediction) => {
+                            if (prediction.score > 0.15) {
+                                const videoRatio = video.videoWidth / video.videoHeight;
+                                const containerRatio = canvas.width / canvas.height;
+                                
+                                let renderWidth, renderHeight, offsetX, offsetY;
+                                if (containerRatio > videoRatio) {
+                                    renderWidth = canvas.width;
+                                    renderHeight = canvas.width / videoRatio;
+                                    offsetX = 0;
+                                    offsetY = (canvas.height - renderHeight) / 2;
+                                } else {
+                                    renderHeight = canvas.height;
+                                    renderWidth = canvas.height * videoRatio;
+                                    offsetX = (canvas.width - renderWidth) / 2;
+                                    offsetY = 0;
+                                }
+                                
+                                const scale = renderWidth / video.videoWidth;
+                                
+                                const [x, y, width, height] = prediction.bbox;
+                                const scaledX = (x * scale) + offsetX;
+                                const scaledY = (y * scale) + offsetY;
+                                const scaledWidth = width * scale;
+                                const scaledHeight = height * scale;
+
+                                const strokeColor = '#3b82f6';
+                                const fillColor = 'rgba(59, 130, 246, 0.2)';
+
+                                if (!signDetectedBbox) {
+                                    signDetectedBbox = prediction.bbox;
+                                }
+
+                                // Draw Edge AI Box
+                                ctx.strokeStyle = strokeColor;
+                                ctx.lineWidth = 2;
+                                ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight);
+                                
+                                // Draw Background Label
+                                ctx.fillStyle = fillColor;
+                                const text = `${prediction.class.toUpperCase()} ${(prediction.score * 100).toFixed(0)}%`;
+                                ctx.font = '10px "JetBrains Mono", monospace';
+                                const textWidth = ctx.measureText(text).width;
+                                ctx.fillRect(scaledX, scaledY - 16, textWidth + 8, 16);
+                                
+                                // Draw Text
+                                ctx.fillStyle = '#FFFFFF';
+                                ctx.fillText(text, scaledX + 4, scaledY - 4);
+                            }
+                        });
+
+                        // Process COCO-SSD Predictions (Vehicles)
+                        cocoPredictions.forEach((prediction: cocoSsd.DetectedObject) => {
+                            if (VEHICLE_CLASSES.includes(prediction.class) && prediction.score > 0.45) {
+                                const videoRatio = video.videoWidth / video.videoHeight;
+                                const containerRatio = canvas.width / canvas.height;
+                                
+                                let renderWidth, renderHeight, offsetX, offsetY;
+                                if (containerRatio > videoRatio) {
+                                    renderWidth = canvas.width;
+                                    renderHeight = canvas.width / videoRatio;
+                                    offsetX = 0;
+                                    offsetY = (canvas.height - renderHeight) / 2;
+                                } else {
+                                    renderHeight = canvas.height;
+                                    renderWidth = canvas.height * videoRatio;
+                                    offsetX = (canvas.width - renderWidth) / 2;
+                                    offsetY = 0;
+                                }
+                                
+                                const scale = renderWidth / video.videoWidth;
+                                
+                                const [x, y, width, height] = prediction.bbox;
+                                const scaledX = (x * scale) + offsetX;
+                                const scaledY = (y * scale) + offsetY;
+                                const scaledWidth = width * scale;
+                                const scaledHeight = height * scale;
+
+                                const strokeColor = '#ef4444'; // Red for vehicles
+                                const fillColor = 'rgba(239, 68, 68, 0.9)';
+
+                                // Draw Edge AI Box
+                                ctx.strokeStyle = strokeColor;
+                                ctx.lineWidth = 2;
+                                ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight);
+                                
+                                // Draw Background Label
+                                ctx.fillStyle = fillColor;
+                                const text = `${prediction.class.toUpperCase()} ${(prediction.score * 100).toFixed(0)}%`;
+                                ctx.font = '10px "JetBrains Mono", monospace';
+                                const textWidth = ctx.measureText(text).width;
+                                ctx.fillRect(scaledX, scaledY - 16, textWidth + 8, 16);
+                                
+                                // Draw Text
+                                ctx.fillStyle = '#FFFFFF';
+                                ctx.fillText(text, scaledX + 4, scaledY - 4);
+                            }
+                        });
+                        
+                        if (onSignBbox) {
+                            onSignBbox(signDetectedBbox);
+                        }
+                        
+                        const currentResult = latestResult.current;
+                        if (currentResult?.tsr_contribution?.detected && currentResult.tsr_contribution.bbox) {
+                            const [bx1, by1, bx2, by2] = currentResult.tsr_contribution.bbox;
+                            
+                            const videoRatio = video.videoWidth / video.videoHeight;
+                            const containerRatio = canvas.width / canvas.height;
+                            
+                            let renderWidth, renderHeight, offsetX, offsetY;
+                            if (containerRatio > videoRatio) {
+                                renderWidth = canvas.width;
+                                renderHeight = canvas.width / videoRatio;
+                                offsetX = 0;
+                                offsetY = (canvas.height - renderHeight) / 2;
+                            } else {
+                                renderHeight = canvas.height;
+                                renderWidth = canvas.height * videoRatio;
+                                offsetX = (canvas.width - renderWidth) / 2;
+                                offsetY = 0;
+                            }
+                            
+                            // The API receives a 640x480 downscaled frame from useDashcam.ts
+                            // Therefore, the backend's bbox is in 640x480 coordinate space!
+                            const tsrScaleX = renderWidth / 640;
+                            const tsrScaleY = renderHeight / 480;
+                            
+                            const scaledX = (bx1 * tsrScaleX) + offsetX;
+                            const scaledY = (by1 * tsrScaleY) + offsetY;
+                            const scaledWidth = ((bx2 - bx1) * tsrScaleX);
+                            const scaledHeight = ((by2 - by1) * tsrScaleY);
+
+                            ctx.strokeStyle = '#3b82f6';
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight);
+                            
+                            ctx.fillStyle = 'rgba(59, 130, 246, 0.9)';
+                            const signName = currentResult.tsr_contribution.class_name?.replace(/_/g, ' ').toUpperCase() || 'SIGN';
+                            const conf = currentResult.tsr_contribution.confidence || 0;
+                            const tsrText = `${signName} ${(conf * 100).toFixed(0)}%`;
+                            ctx.font = '10px "JetBrains Mono", monospace';
+                            const tsrTextWidth = ctx.measureText(tsrText).width;
+                            ctx.fillRect(scaledX, scaledY - 16, tsrTextWidth + 8, 16);
+                            
+                            ctx.fillStyle = '#FFFFFF';
+                            ctx.fillText(tsrText, scaledX + 4, scaledY - 4);
+                        }
+                    } catch (e) {
+                        console.error("Error during detection loop:", e);
+                    }
+                }
+            }
+            animationId = requestAnimationFrame(detectFrame);
+        };
+
+        if (isActive) {
+            detectFrame();
+        }
+
+        return () => {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+        };
+    }, [isActive, isModelLoaded]);
 
     const tsr = result?.tsr_contribution;
 
@@ -59,6 +305,22 @@ export default function DashcamFeed({ isActive, error, onVideoReady, onVideoUplo
                     playsInline
                     muted
                 />
+                <canvas 
+                    ref={canvasRef} 
+                    style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 5 }}
+                />
+
+                {/* YOLO Error Overlay */}
+                {modelError && (
+                    <div style={{ position: 'absolute', top: '10px', left: '10px', background: 'rgba(220, 38, 38, 0.9)', color: 'white', padding: '8px', borderRadius: '4px', zIndex: 10, fontSize: '12px', maxWidth: '80%' }}>
+                        <strong>YOLO Init Error:</strong> {modelError}
+                    </div>
+                )}
+                
+                {/* YOLO Debug Overlay */}
+                <div style={{ position: 'absolute', bottom: '10px', left: '10px', background: 'rgba(0, 0, 0, 0.7)', color: 'white', padding: '4px 8px', borderRadius: '4px', zIndex: 10, fontSize: '12px' }}>
+                    YOLO Signs Returned: {yoloCount}
+                </div>
 
                 {/* No-camera overlay */}
                 {!isActive && !error && (
