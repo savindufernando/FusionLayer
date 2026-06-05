@@ -122,9 +122,9 @@ def load_config() -> dict:
             "threshold_medium": raw.get("threshold_medium", 35.0),
             "ema_alpha": raw.get("ema_alpha", 0.35),
             # Module URLs for auto-predict
-            "tsr_url": raw.get("modules", {}).get("tsr", {}).get("url", "http://localhost:8001"),
+            "tsr_url": os.getenv("TSR_URL", raw.get("modules", {}).get("tsr", {}).get("url", "http://localhost:8001")),
             "tsr_endpoint": raw.get("modules", {}).get("tsr", {}).get("predict_endpoint", "/api/predict/base64"),
-            "dz_url": raw.get("modules", {}).get("dz", {}).get("url", "http://localhost:8000"),
+            "dz_url": os.getenv("DZ_URL", raw.get("modules", {}).get("dz", {}).get("url", "http://localhost:8000")),
             "dz_endpoint": raw.get("modules", {}).get("dz", {}).get("predict_endpoint", "/api/predict"),
         }
     return {}
