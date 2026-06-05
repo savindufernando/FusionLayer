@@ -10,11 +10,13 @@ from sqlalchemy.orm import sessionmaker
 # ── XAMPP MySQL Connection ────────────────────────────────────────────────
 # Default XAMPP: root user, no password, port 3306
 # Change these if your XAMPP setup differs.
-MYSQL_USER = "root"
-MYSQL_PASSWORD = ""           # XAMPP default — no password
-MYSQL_HOST = "localhost"
-MYSQL_PORT = 3306
-MYSQL_DB = "driveguard_blackspots"
+import os
+
+MYSQL_USER = os.getenv("MYSQL_USER", "root")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
+MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
+MYSQL_PORT = int(os.getenv("MYSQL_PORT", 3306))
+MYSQL_DB = os.getenv("MYSQL_DB", "driveguard_blackspots")
 
 DATABASE_URL = (
     f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}"
