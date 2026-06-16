@@ -51,6 +51,21 @@ def init_db():
     
     try:
         Base.metadata.create_all(bind=engine)
+        
+        # Seed default admin if it doesn't exist
+        db = SessionLocal()
+        try:
+            from .models import AdminUser
+            admin = db.query(AdminUser).filter(AdminUser.username == "admin").first()
+            if not admin:
+                default_admin = AdminUser(username="admin", password="admin123")
+                db.add(default_admin)
+                db.commit()
+        except Exception as seed_err:
+            print(f"Warning: Failed to seed admin user: {seed_err}")
+        finally:
+            db.close()
+            
     except OperationalError as e:
         print("\n" + "="*70)
         print("🚨 DATABASE CONNECTION ERROR 🚨")

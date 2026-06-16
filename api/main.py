@@ -46,8 +46,9 @@ from .schemas import (
 from .security import apply_security
 from .circuit_breaker import CircuitBreaker
 from .database import init_db
-from .mobile_router import router as mobile_router, init_mobile_router
+from .mobile_router import router as mobile_router, init_mobile_router, migrate_ride_groups_creator_id
 from .social_router import router as social_router, seed_challenges
+from .admin_router import router as admin_router
 
 from src.fusion_engine import FusionEngine, TSRInput, DZInput, HotspotInput
 try:
@@ -156,6 +157,7 @@ async def lifespan(app: FastAPI):
     seed_db = SessionLocal()
     try:
         seed_challenges(seed_db)
+        migrate_ride_groups_creator_id(seed_db)
     finally:
         seed_db.close()
     
@@ -189,6 +191,7 @@ app = FastAPI(
 # Include routers
 app.include_router(mobile_router)
 app.include_router(social_router)
+app.include_router(admin_router)
 
 apply_security(app, module_name="fusion")
 
@@ -196,6 +199,12 @@ apply_security(app, module_name="fusion")
 dashboard_dir = Path(__file__).parent.parent / "dashboard"
 if dashboard_dir.exists():
     app.mount("/dashboard", StaticFiles(directory=str(dashboard_dir), html=True), name="dashboard")
+
+# Serve user photo uploads
+uploads_dir = Path(__file__).parent.parent / "uploads"
+uploads_dir.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
+
 
 
 @app.get("/")
@@ -412,6 +421,100 @@ async def circuit_status():
     }
 
 
+async def _plan_navigation_osrm_fallback(
+    start_lat: float, start_lon: float, end_lat: float, end_lon: float
+):
+    """Fallback router querying OSRM for alternative route choices and calculating safety scores."""
+    import copy
+    url = f"https://router.project-osrm.org/route/v1/driving/{start_lon},{start_lat};{end_lon},{end_lat}?overview=full&geometries=geojson&steps=true&alternatives=true"
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.get(url)
+            if res.status_code != 200:
+                raise HTTPException(status_code=res.status_code, detail="OSRM routing service failed")
+            data = res.json()
+    except Exception as e:
+        logger.error(f"OSRM fallback API call failed: {e}")
+        raise HTTPException(status_code=500, detail=f"OSRM routing failed: {str(e)}")
+        
+    if data.get("code") != "Ok" or not data.get("routes"):
+        raise HTTPException(status_code=400, detail="No route found between coordinates")
+        
+    routes_list = []
+    for i, r in enumerate(data["routes"]):
+        # OSRM coordinates format: [[lon, lat], ...] -> convert to [[lat, lon], ...]
+        geo_coords = r["geometry"]["coordinates"]
+        coords = [[c[1], c[0]] for c in geo_coords]
+        
+        # Calculate safety score based on hotspots (if routing_engine is available)
+        safety_score = 100.0
+        if routing_engine is not None:
+            safety_score = routing_engine._calculate_route_safety_score(coords)
+            
+        # Extract instructions from steps
+        instructions = []
+        for leg in r.get("legs", []):
+            for step in leg.get("steps", []):
+                name = step.get("name", "")
+                if name and (not instructions or instructions[-1]["road"] != name):
+                    instructions.append({"road": name, "instruction": f"Proceed on {name}"})
+        if not instructions:
+            instructions = [{"road": "Route", "instruction": "Follow the highlighted path"}]
+            
+        routes_list.append({
+            "type": "safest" if i == 0 else "fastest" if i == 1 else f"alternative_{i}",
+            "coordinates": coords,
+            "instructions": instructions,
+            "distance_m": float(r["distance"]),
+            "safety_score": safety_score,
+            "duration_s": float(r["duration"])
+        })
+        
+    if len(routes_list) > 1:
+        # Determine safest and fastest
+        safest_route = max(routes_list, key=lambda x: x["safety_score"])
+        fastest_route = min(routes_list, key=lambda x: x["duration_s"])
+        
+        for r in routes_list:
+            if r is safest_route and r is fastest_route:
+                r["type"] = "safest"
+            elif r is safest_route:
+                r["type"] = "safest"
+            elif r is fastest_route:
+                r["type"] = "fastest"
+            else:
+                r["type"] = "alternative"
+    else:
+        routes_list[0]["type"] = "safest"
+        
+    # Ensure both "safest" and "fastest" type routes are present for client UI rendering
+    has_safest = any(r["type"] == "safest" for r in routes_list)
+    has_fastest = any(r["type"] == "fastest" for r in routes_list)
+    
+    if not has_safest:
+        routes_list[0]["type"] = "safest"
+    if not has_fastest:
+        if len(routes_list) > 1:
+            routes_list[1]["type"] = "fastest"
+        else:
+            # Duplicate the single route as fastest route choice
+            fastest_copy = copy.deepcopy(routes_list[0])
+            fastest_copy["type"] = "fastest"
+            routes_list.append(fastest_copy)
+                
+    primary_route = next((r for r in routes_list if r["type"] == "safest"), routes_list[0])
+    
+    return {
+        "success": True,
+        "coordinates": primary_route["coordinates"],
+        "instructions": primary_route["instructions"],
+        "distance_m": primary_route["distance_m"],
+        "safety_score": primary_route["safety_score"],
+        "routes": routes_list
+    }
+
+
 @app.get("/api/navigation/plan")
 async def plan_navigation(
     start_lat: float, 
@@ -421,25 +524,77 @@ async def plan_navigation(
     safety_weight: float = 0.8
 ):
     """
-    Calculates the Safe-Route prioritizing risk avoidance over speed.
+    Calculates both the Safest Route and the Fastest Route.
     """
     if routing_engine is None:
-        raise HTTPException(status_code=503, detail="Routing engine not available")
+        return await _plan_navigation_osrm_fallback(start_lat, start_lon, end_lat, end_lon)
         
     try:
-        route = routing_engine.calculate_safe_route(
+        # Check if coordinates can be matched to Colombo database
+        start_node = routing_engine.get_nearest_node(start_lat, start_lon)
+        end_node = routing_engine.get_nearest_node(end_lat, end_lon)
+        
+        if start_node is None or end_node is None:
+            # Coordinates are outside Colombo bounds -> Use OSRM alternatives fallback
+            logger.info("Coordinates outside Colombo bounds. Using OSRM alternatives routing fallback.")
+            return await _plan_navigation_osrm_fallback(start_lat, start_lon, end_lat, end_lon)
+
+        # 1. Calculate safest route using safety_weight
+        safest_route = routing_engine.calculate_safe_route(
             start_lat=start_lat,
             start_lon=start_lon,
             end_lat=end_lat,
             end_lon=end_lon,
             safety_weight=safety_weight
         )
-        if not route["success"]:
-            raise HTTPException(status_code=400, detail=route["message"])
+        
+        if not safest_route["success"]:
+            return await _plan_navigation_osrm_fallback(start_lat, start_lon, end_lat, end_lon)
             
-        return route
+        # 2. Calculate fastest route using safety_weight = 0.0
+        fastest_route = routing_engine.calculate_safe_route(
+            start_lat=start_lat,
+            start_lon=start_lon,
+            end_lat=end_lat,
+            end_lon=end_lon,
+            safety_weight=0.0
+        )
+        
+        # 3. Calculate safety scores
+        safest_score = routing_engine._calculate_route_safety_score(safest_route["coordinates"])
+        fastest_score = routing_engine._calculate_route_safety_score(fastest_route["coordinates"])
+        
+        # 4. Construct unified response (Safest is default at top-level for backwards compatibility)
+        return {
+            "success": True,
+            "coordinates": safest_route["coordinates"],
+            "instructions": safest_route["instructions"],
+            "distance_m": safest_route["distance_m"],
+            "safety_score": safest_score,
+            "routes": [
+                {
+                    "type": "safest",
+                    "coordinates": safest_route["coordinates"],
+                    "instructions": safest_route["instructions"],
+                    "distance_m": safest_route["distance_m"],
+                    "safety_score": safest_score
+                },
+                {
+                    "type": "fastest",
+                    "coordinates": fastest_route["coordinates"],
+                    "instructions": fastest_route["instructions"],
+                    "distance_m": fastest_route["distance_m"],
+                    "safety_score": fastest_score
+                }
+            ]
+        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to calculate route: {str(e)}")
+        import traceback
+        logger.error(f"plan_navigation error: {traceback.format_exc()}. Falling back to OSRM.")
+        try:
+            return await _plan_navigation_osrm_fallback(start_lat, start_lon, end_lat, end_lon)
+        except Exception as fallback_err:
+            raise HTTPException(status_code=500, detail=f"Failed to calculate route: {str(fallback_err)}")
 
 
 @app.websocket("/api/fusion/ws")

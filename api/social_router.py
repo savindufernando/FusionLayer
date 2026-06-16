@@ -1,11 +1,14 @@
 """
 Social API Router — Community features for DriveGuard
 """
+import os
 import math
+import uuid
+import shutil
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 
@@ -13,7 +16,8 @@ from .database import get_db
 from .models import (
     User, Vehicle, Trip, TelemetryPoint, UserFollow, SharedTrip,
     TripReaction, CommunityPost, DrivingChallenge,
-    UserChallengeProgress, SharedRoute, Notification
+    UserChallengeProgress, SharedRoute, Notification,
+    UserStatusItem, UserStatusView
 )
 from .schemas import (
     DriverProfileResponse, ProfileUpdateRequest,
@@ -26,7 +30,10 @@ from .schemas import (
     SharedRouteCreate, SharedRouteResponse, SharedRoutesListResponse,
     NearbyDriverResponse,
     NotificationResponse, NotificationListResponse, HeatmapPoint, HeatmapResponse,
-    TripCompStats, TripComparisonResponse, DrivingReportResponse
+    TripCompStats, TripComparisonResponse, DrivingReportResponse,
+    StatusItemCreate, StatusItemResponse, UserStoriesResponse,
+    StatusFeedResponse, StatusMapItemResponse, StatusMapResponse,
+    StatusReplyRequest, ViewerProfileResponse, StatusViewersResponse
 )
 
 logger = logging.getLogger("social_api")
@@ -630,3 +637,286 @@ async def generate_driving_report(user_id: str, period: str = "monthly", db: Ses
         improvement_pct=5.4, # Mock value
         report_url=f"/api/social/report/download/{user_id}"
     )
+
+
+# ─── Social Status (Stories) Endpoints ────────────────────────────────────
+
+@router.post("/upload")
+async def upload_status_photo(file: UploadFile = File(...)):
+    """Upload photo for stories. Saved to /uploads directory."""
+    try:
+        # Resolve target uploads directory (parent dir of api/ is FusionLayer/)
+        from pathlib import Path
+        uploads_dir = Path(__file__).parent.parent / "uploads"
+        uploads_dir.mkdir(exist_ok=True)
+        
+        ext = os.path.splitext(file.filename)[1]
+        if not ext:
+            ext = ".jpg"
+        filename = f"{uuid.uuid4()}{ext}"
+        filepath = uploads_dir / filename
+        
+        with open(filepath, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        return {"url": f"/uploads/{filename}"}
+    except Exception as e:
+        raise HTTPException(500, f"Photo upload failed: {str(e)}")
+
+
+@router.post("/status/create")
+async def create_status_item(data: StatusItemCreate, db: Session = Depends(get_db)):
+    """Create a new WhatsApp-style status story slide."""
+    user = db.query(User).filter(User.id == data.user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+        
+    now = datetime.utcnow()
+    expires = now + timedelta(hours=24)
+    
+    item = UserStatusItem(
+        user_id=data.user_id,
+        content_type=data.content_type,
+        text_content=data.text_content,
+        bg_color=data.bg_color,
+        font_family=data.font_family,
+        media_url=data.media_url,
+        latitude=data.latitude if data.share_location else None,
+        longitude=data.longitude if data.share_location else None,
+        created_at=now,
+        expires_at=expires
+    )
+    db.add(item)
+    
+    # Award +2 XP for posting status updates
+    user.xp_points = (user.xp_points or 0) + 2
+    user.driver_level = _calc_level(user.xp_points)
+    
+    db.commit()
+    db.refresh(item)
+    return {
+        "success": True,
+        "status_item_id": item.id,
+        "expires_at": str(item.expires_at)
+    }
+
+
+@router.get("/status/feed", response_model=StatusFeedResponse)
+async def get_status_feed(user_id: str, db: Session = Depends(get_db)):
+    """Fetch status stories of followed contacts (and own), falling back to global active updates."""
+    now = datetime.utcnow()
+    
+    # 1. Find user ids to show (followings + self)
+    following_ids = [f.following_id for f in db.query(UserFollow).filter(UserFollow.follower_id == user_id).all()]
+    following_ids.append(user_id)
+    
+    # Check if there are active statuses from followings
+    active_items = db.query(UserStatusItem).filter(
+        UserStatusItem.user_id.in_(following_ids),
+        UserStatusItem.expires_at > now
+    ).all()
+    
+    # 2. Fall back to global active statuses if feed from followings is empty
+    if not active_items:
+        active_items = db.query(UserStatusItem).filter(
+            UserStatusItem.expires_at > now
+        ).all()
+        
+    # Group items by user
+    user_groups = {}
+    for item in active_items:
+        uid = item.user_id
+        if uid not in user_groups:
+            user_groups[uid] = []
+        user_groups[uid].append(item)
+        
+    feed_list = []
+    for uid, items in user_groups.items():
+        u = db.query(User).filter(User.id == uid).first()
+        if not u:
+            continue
+            
+        # Sort items: oldest to newest
+        items.sort(key=lambda x: x.created_at)
+        
+        # Format items response
+        item_responses = [
+            StatusItemResponse(
+                id=x.id,
+                user_id=x.user_id,
+                content_type=x.content_type,
+                text_content=x.text_content,
+                bg_color=x.bg_color,
+                font_family=x.font_family,
+                media_url=x.media_url,
+                latitude=x.latitude,
+                longitude=x.longitude,
+                created_at=str(x.created_at)
+            )
+            for x in items
+        ]
+        
+        # Sort key for the feed user list (most recent status time)
+        last_time = max(x.created_at for x in items)
+        
+        feed_list.append((
+            last_time,
+            UserStoriesResponse(
+                user_id=u.id,
+                name=u.name,
+                avatar_color=u.avatar_color or "#00E676",
+                driver_level=u.driver_level or 1,
+                safety_score=round(u.safety_score or 100.0, 1),
+                last_update_time=str(last_time),
+                items=item_responses
+            )
+        ))
+        
+    # Sort the feed: users with the most recent updates first
+    feed_list.sort(key=lambda x: x[0], reverse=True)
+    
+    return StatusFeedResponse(
+        count=len(feed_list),
+        feed=[x[1] for x in feed_list]
+    )
+
+
+@router.get("/status/map", response_model=StatusMapResponse)
+async def get_status_map_data(db: Session = Depends(get_db)):
+    """Fetch active status coordinate nodes for rendering on status map."""
+    now = datetime.utcnow()
+    
+    # Query all active status items containing GPS coords
+    active_gps_items = db.query(UserStatusItem).filter(
+        UserStatusItem.expires_at > now,
+        UserStatusItem.latitude != None,
+        UserStatusItem.longitude != None
+    ).order_by(UserStatusItem.created_at.desc()).all()
+    
+    # Keep only the latest GPS status slide per user
+    user_latest_status = {}
+    user_counts = {}
+    for item in active_gps_items:
+        uid = item.user_id
+        if uid not in user_latest_status:
+            user_latest_status[uid] = item
+        user_counts[uid] = user_counts.get(uid, 0) + 1
+        
+    items_list = []
+    for uid, item in user_latest_status.items():
+        u = db.query(User).filter(User.id == uid).first()
+        if not u:
+            continue
+            
+        items_list.append(
+            StatusMapItemResponse(
+                user_id=u.id,
+                name=u.name,
+                avatar_color=u.avatar_color or "#00E676",
+                driver_level=u.driver_level or 1,
+                safety_score=round(u.safety_score or 100.0, 1),
+                latitude=item.latitude,
+                longitude=item.longitude,
+                last_update_time=str(item.created_at),
+                item_count=user_counts[uid]
+            )
+        )
+        
+    return StatusMapResponse(
+        count=len(items_list),
+        items=items_list
+    )
+
+
+@router.post("/status/reply")
+async def reply_to_status(data: StatusReplyRequest, db: Session = Depends(get_db)):
+    """Send text reply message to a status creator, generating notification."""
+    sender = db.query(User).filter(User.id == data.sender_id).first()
+    if not sender:
+        raise HTTPException(404, "Sender not found")
+        
+    status_item = db.query(UserStatusItem).filter(UserStatusItem.id == data.status_item_id).first()
+    if not status_item:
+        raise HTTPException(404, "Status item not found")
+        
+    # Create notification for creator
+    _create_notif(
+        user_id=status_item.user_id,
+        type="status_reply",
+        title="Status Reply",
+        message=f"{sender.name} replied to your status: \"{data.message}\"",
+        extra_data={"sender_id": data.sender_id, "status_item_id": data.status_item_id},
+        db=db
+    )
+    db.commit()
+    return {"success": True}
+
+
+@router.post("/status/view/{status_item_id}")
+async def log_status_view(status_item_id: int, viewer_id: str, db: Session = Depends(get_db)):
+    """Log when a driver views a status slide (story view tracking)."""
+    existing = db.query(UserStatusView).filter(
+        UserStatusView.status_item_id == status_item_id,
+        UserStatusView.viewer_id == viewer_id
+    ).first()
+    
+    if not existing:
+        view = UserStatusView(status_item_id=status_item_id, viewer_id=viewer_id)
+        db.add(view)
+        db.commit()
+        
+    return {"success": True}
+
+
+@router.get("/status/viewers/{status_item_id}", response_model=StatusViewersResponse)
+async def get_status_viewers(status_item_id: int, db: Session = Depends(get_db)):
+    """Retrieve the list of drivers who viewed a specific status slide."""
+    views = db.query(UserStatusView).filter(UserStatusView.status_item_id == status_item_id).all()
+    viewer_list = []
+    for v in views:
+        u = db.query(User).filter(User.id == v.viewer_id).first()
+        if u:
+            viewer_list.append(
+                ViewerProfileResponse(
+                    user_id=u.id,
+                    name=u.name,
+                    avatar_color=u.avatar_color or "#00E676",
+                    driver_level=u.driver_level or 1,
+                    safety_score=round(u.safety_score or 100.0, 1),
+                    viewed_at=str(v.viewed_at)
+                )
+            )
+            
+    return StatusViewersResponse(
+        status_item_id=status_item_id,
+        viewer_count=len(viewer_list),
+        viewers=viewer_list
+    )
+
+
+@router.delete("/status/{status_item_id}")
+async def delete_status_item(status_item_id: int, user_id: str, db: Session = Depends(get_db)):
+    """Delete a specific status slide. Only the owner can delete it."""
+    item = db.query(UserStatusItem).filter(UserStatusItem.id == status_item_id).first()
+    if not item:
+        raise HTTPException(404, "Status item not found")
+    if item.user_id != user_id:
+        raise HTTPException(403, "You can only delete your own status")
+
+    # Delete associated views first
+    db.query(UserStatusView).filter(UserStatusView.status_item_id == status_item_id).delete()
+    db.delete(item)
+    db.commit()
+    return {"success": True, "deleted_id": status_item_id}
+
+
+@router.delete("/status/all/{user_id}")
+async def delete_all_user_statuses(user_id: str, db: Session = Depends(get_db)):
+    """Delete all active status items for a user."""
+    items = db.query(UserStatusItem).filter(UserStatusItem.user_id == user_id).all()
+    for item in items:
+        db.query(UserStatusView).filter(UserStatusView.status_item_id == item.id).delete()
+        db.delete(item)
+    db.commit()
+    return {"success": True, "deleted_count": len(items)}
+

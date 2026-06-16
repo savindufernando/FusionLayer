@@ -22,20 +22,48 @@ import logging
 from datetime import datetime, timezone, timedelta
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from fastapi.responses import HTMLResponse
+import shutil
+import uuid
+from pathlib import Path
 from sqlalchemy.orm import Session
+import bcrypt
+import hashlib
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    if not hashed_password:
+        return False
+    # Try bcrypt first
+    try:
+        if hashed_password.startswith('$2b$') or hashed_password.startswith('$2a$'):
+            return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+    except Exception:
+        pass
+    
+    # Fallback to SHA-256 (for passwords reset/changed from the admin panel)
+    try:
+        sha256_hash = hashlib.sha256(plain_password.encode('utf-8')).hexdigest()
+        return sha256_hash == hashed_password
+    except Exception:
+        return False
+
+def get_password_hash(password: str) -> str:
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
 
 from .database import get_db
 from .models import (
     User, Vehicle, Trip, TelemetryPoint,
     CrowdsourcedSign, BlackspotReport, InsuranceClaim, AccidentReport,
     PermanentHotspot, UserChallengeProgress, DrivingChallenge, Notification,
-    EmergencyProfile, LiveTripSession, QuickHazardAlert, DigitalWallet
+    EmergencyProfile, LiveTripSession, QuickHazardAlert, DigitalWallet,
+    RideGroup, GroupMember, GroupAnnouncement, ConvoyPoll, ConvoyPollVote
 )
 from .schemas import (
     MobileAnalyzeRequest, MobileAnalyzeResponse,
-    UserCreate, UserResponse,
+    UserCreate, UserCreateWithPassword, UserResponse,
+    EmailCheckRequest, EmailCheckResponse, LoginRequest,
     VehicleCreate, VehicleResponse,
     TripResponse, TripListResponse,
     TelemetryPointResponse, TripDetailResponse,
@@ -49,7 +77,10 @@ from .schemas import (
     RideGroupCreate, RideGroupJoin, GroupMemberResponse, RideGroupResponse, GroupLiveLocationResponse,
     TelematicsEventRequest,
     EmergencySOSRequest, EmergencySOSResponse,
-    WalletCreate, WalletResponse
+    WalletCreate, WalletResponse,
+    ProfileUpdateRequest, VehicleUpdateRequest,
+    ConvoyStartRequest, AnnouncementCreateRequest, GroupAnnouncementResponse, ConvoyLiveDetailsResponse, ConvoyMemberDetails,
+    ConvoyPollCreateRequest, ConvoyPollVoteRequest, ConvoyPollResponse
 )
 from .circuit_breaker import CircuitBreaker
 
@@ -57,6 +88,40 @@ from src.fusion_engine import FusionEngine, TSRInput, DZInput, HotspotInput
 
 
 logger = logging.getLogger("mobile_api")
+
+
+def migrate_ride_groups_creator_id(db: Session):
+    """
+    Migrate existing ride groups to set creator_id.
+    For groups without creator_id, assign the ADMIN member or first member as creator.
+    """
+    try:
+        groups_without_creator = db.query(RideGroup).filter(RideGroup.creator_id == None).all()
+        if not groups_without_creator:
+            logger.info("All ride groups already have creator_id set")
+            return
+
+        for group in groups_without_creator:
+            admin_member = db.query(GroupMember).filter(
+                GroupMember.group_id == group.id,
+                GroupMember.role == "ADMIN"
+            ).first()
+
+            if admin_member:
+                group.creator_id = admin_member.user_id
+            else:
+                any_member = db.query(GroupMember).filter(
+                    GroupMember.group_id == group.id
+                ).first()
+                if any_member:
+                    group.creator_id = any_member.user_id
+
+        db.commit()
+        logger.info(f"Migrated {len(groups_without_creator)} ride groups with creator_id")
+    except Exception as e:
+        logger.error(f"Error migrating ride groups creator_id: {e}")
+        db.rollback()
+
 
 router = APIRouter(prefix="/api/mobile", tags=["Mobile App"])
 
@@ -218,7 +283,9 @@ async def mobile_analyze(request: MobileAnalyzeRequest, db: Session = Depends(ge
                                              math.cos(dist_km/R)-math.sin(lat1)*math.sin(lat2))
                     
                     est_lat, est_lon = math.degrees(lat2), math.degrees(lon2)
-                    _save_crowdsourced_sign(db, tsr, est_lat, est_lon)
+                    # The user requested that signs are ONLY updated by admins.
+                    # Mobile app will visualize it (returned in response) but won't save it to the DB.
+                    # _save_crowdsourced_sign(db, tsr, est_lat, est_lon)
             except Exception as e:
                 _cb_tsr.record_failure()
                 logger.warning(f"TSR module call failed: {e}")
@@ -291,7 +358,15 @@ async def mobile_analyze(request: MobileAnalyzeRequest, db: Session = Depends(ge
     elif result.fused_risk_score >= 35:
         alert_level = "YELLOW"
 
-    # ── Store telemetry point ────────────────────────────────
+    # ── Calculate Distance & Store telemetry point ───────────
+    last_point = db.query(TelemetryPoint).filter(
+        TelemetryPoint.trip_id == trip.id
+    ).order_by(TelemetryPoint.timestamp.desc()).first()
+    
+    if last_point:
+        dist_km = _haversine(last_point.latitude, last_point.longitude, request.latitude, request.longitude)
+        trip.total_distance_km = (trip.total_distance_km or 0.0) + dist_km
+
     detected_sign_names = [s.get("class_name", "") for s in result.active_signs] if result.active_signs else []
 
     point = TelemetryPoint(
@@ -348,20 +423,82 @@ async def mobile_analyze(request: MobileAnalyzeRequest, db: Session = Depends(ge
 
 # ─── User CRUD ────────────────────────────────────────────────────────────
 
+@router.post("/auth/check-email", response_model=EmailCheckResponse)
+async def check_email(data: EmailCheckRequest, db: Session = Depends(get_db)):
+    """Check if an email is already registered."""
+    email_clean = data.email.strip().lower()
+    existing = db.query(User).filter(User.email.ilike(email_clean)).first()
+    return EmailCheckResponse(exists=bool(existing))
+
+
+@router.post("/auth/login", response_model=UserResponse)
+async def login(data: LoginRequest, db: Session = Depends(get_db)):
+    """Authenticate a user."""
+    email_clean = data.email.strip().lower()
+    user = db.query(User).filter(User.email.ilike(email_clean)).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not verify_password(data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+    return UserResponse(
+        id=user.id, name=user.name, email=user.email,
+        profile_picture_url=user.profile_picture_url,
+        created_at=str(user.created_at), vehicle_count=len(user.vehicles)
+    )
+
 @router.post("/users", response_model=UserResponse)
-async def create_user(data: UserCreate, db: Session = Depends(get_db)):
-    """Register a new DriveGuard user."""
-    existing = db.query(User).filter(User.email == data.email).first()
+async def create_user(data: UserCreateWithPassword, db: Session = Depends(get_db)):
+    """Register a new DriveGuard user with password."""
+    email_clean = data.email.strip().lower()
+    existing = db.query(User).filter(User.email.ilike(email_clean)).first()
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
 
-    user = User(name=data.name, email=data.email)
+    user = User(
+        name=data.name, 
+        email=email_clean, 
+        password_hash=get_password_hash(data.password)
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
     return UserResponse(
         id=user.id, name=user.name, email=user.email,
+        profile_picture_url=user.profile_picture_url,
         created_at=str(user.created_at), vehicle_count=0
+    )
+
+
+@router.post("/users/{user_id}/profile-picture", response_model=UserResponse)
+async def upload_profile_picture(
+    user_id: str, 
+    file: UploadFile = File(...), 
+    db: Session = Depends(get_db)
+):
+    """Upload a profile picture for a user."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    uploads_dir = Path(__file__).parent.parent / "uploads" / "profiles"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    
+    ext = file.filename.split('.')[-1] if '.' in file.filename else 'jpg'
+    filename = f"{user_id}_{uuid.uuid4().hex[:8]}.{ext}"
+    file_path = uploads_dir / filename
+    
+    with file_path.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    user.profile_picture_url = f"/uploads/profiles/{filename}"
+    db.commit()
+    db.refresh(user)
+    
+    return UserResponse(
+        id=user.id, name=user.name, email=user.email,
+        profile_picture_url=user.profile_picture_url,
+        created_at=str(user.created_at), vehicle_count=len(user.vehicles)
     )
 
 
@@ -373,6 +510,32 @@ async def get_user(user_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
     return UserResponse(
         id=user.id, name=user.name, email=user.email,
+        profile_picture_url=user.profile_picture_url,
+        created_at=str(user.created_at),
+        vehicle_count=len(user.vehicles)
+    )
+
+
+@router.put("/users/{user_id}", response_model=UserResponse)
+async def update_user(user_id: str, data: ProfileUpdateRequest, db: Session = Depends(get_db)):
+    """Update user profile from the mobile app."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if data.name is not None:
+        user.name = data.name
+    # if data.bio is not None:
+    #     user.bio = data.bio
+    # if data.avatar_color is not None:
+    #     user.avatar_color = data.avatar_color
+
+    db.commit()
+    db.refresh(user)
+
+    return UserResponse(
+        id=user.id, name=user.name, email=user.email,
+        profile_picture_url=user.profile_picture_url,
         created_at=str(user.created_at),
         vehicle_count=len(user.vehicles)
     )
@@ -391,6 +554,7 @@ async def add_vehicle(user_id: str, data: VehicleCreate, db: Session = Depends(g
         user_id=user_id,
         make_model=data.make_model,
         vehicle_type=data.vehicle_type,
+        registration_number=data.registration_number,
         led_stick_mac=data.led_stick_mac
     )
     db.add(vehicle)
@@ -399,6 +563,7 @@ async def add_vehicle(user_id: str, data: VehicleCreate, db: Session = Depends(g
     return VehicleResponse(
         id=vehicle.id, user_id=vehicle.user_id,
         make_model=vehicle.make_model, vehicle_type=vehicle.vehicle_type,
+        registration_number=vehicle.registration_number,
         led_stick_mac=vehicle.led_stick_mac,
         created_at=str(vehicle.created_at), trip_count=0
     )
@@ -412,12 +577,53 @@ async def list_vehicles(user_id: str, db: Session = Depends(get_db)):
         VehicleResponse(
             id=v.id, user_id=v.user_id,
             make_model=v.make_model, vehicle_type=v.vehicle_type,
+            registration_number=v.registration_number,
             led_stick_mac=v.led_stick_mac,
             created_at=str(v.created_at),
             trip_count=len(v.trips)
         )
         for v in vehicles
     ]
+
+
+@router.put("/vehicles/{vehicle_id}", response_model=VehicleResponse)
+async def update_vehicle(vehicle_id: str, data: VehicleUpdateRequest, db: Session = Depends(get_db)):
+    """Update vehicle details from the mobile app."""
+    vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
+    if not vehicle:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+
+    if data.make_model is not None:
+        vehicle.make_model = data.make_model
+    if data.vehicle_type is not None:
+        vehicle.vehicle_type = data.vehicle_type
+    if data.registration_number is not None:
+        vehicle.registration_number = data.registration_number
+    if data.led_stick_mac is not None:
+        vehicle.led_stick_mac = data.led_stick_mac
+
+    db.commit()
+    db.refresh(vehicle)
+
+    return VehicleResponse(
+        id=vehicle.id, user_id=vehicle.user_id,
+        make_model=vehicle.make_model, vehicle_type=vehicle.vehicle_type,
+        registration_number=vehicle.registration_number,
+        led_stick_mac=vehicle.led_stick_mac,
+        created_at=str(vehicle.created_at), trip_count=len(vehicle.trips)
+    )
+
+
+@router.delete("/vehicles/{vehicle_id}")
+async def delete_vehicle(vehicle_id: str, db: Session = Depends(get_db)):
+    """Delete a vehicle."""
+    vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
+    if not vehicle:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+
+    db.delete(vehicle)
+    db.commit()
+    return {"detail": "Vehicle deleted successfully"}
 
 
 # ─── Trip Endpoints ──────────────────────────────────────────────────────
@@ -564,11 +770,48 @@ async def report_blackspot(
         longitude=data.longitude,
         description=data.description,
         report_type=data.report_type,
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=2)
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=24)
     )
     db.add(report)
     db.commit()
     db.refresh(report)
+
+    # ── Automated Promotion Pipeline ──
+    # Check if there are 3 or more reports within 50 meters
+    now = datetime.now(timezone.utc)
+    recent_reports = db.query(BlackspotReport).filter(
+        BlackspotReport.expires_at > now
+    ).all()
+
+    cluster = []
+    for r in recent_reports:
+        if _haversine(data.latitude, data.longitude, r.latitude, r.longitude) <= 0.05: # 50 meters
+            cluster.append(r)
+
+    if len(cluster) >= 3:
+        # Calculate center point
+        avg_lat = sum(r.latitude for r in cluster) / len(cluster)
+        avg_lon = sum(r.longitude for r in cluster) / len(cluster)
+        
+        # Create Permanent Hotspot
+        hotspot = PermanentHotspot(
+            latitude=avg_lat,
+            longitude=avg_lon,
+            name=f"Auto-Promoted Hotspot ({data.report_type})",
+            report_count=len(cluster),
+            risk_boost=min(0.2 * len(cluster), 0.8),
+            is_active=True
+        )
+        db.add(hotspot)
+        
+        # Delete the temporary reports since they are now permanent
+        for r in cluster:
+            db.delete(r)
+            
+        db.commit()
+
+    # Note: If it was promoted, the response still returns the initial report data 
+    # to the mobile app for confirmation, but it's already a permanent hotspot in DB.
     return BlackspotResponse(
         id=report.id, user_id=report.user_id,
         latitude=report.latitude, longitude=report.longitude,
@@ -1147,11 +1390,12 @@ async def create_ride_group(
     """Create a new Ride Group and add the creator as ADMIN."""
     import uuid
     invite_code = uuid.uuid4().hex[:6].upper()
-    
+
     group = RideGroup(
         name=data.name,
         description=data.description,
-        invite_code=invite_code
+        invite_code=invite_code,
+        creator_id=user_id
     )
     db.add(group)
     db.commit()
@@ -1168,13 +1412,73 @@ async def create_ride_group(
 
     return await get_group_details(group.id, db)
 
+@router.get("/debug/groups/{user_id}")
+async def debug_groups(user_id: str, db: Session = Depends(get_db)):
+    """Debug endpoint to see what groups exist and who belongs to them."""
+    all_groups = db.query(RideGroup).all()
+    all_members = db.query(GroupMember).all()
+    all_users = db.query(User).all()
+
+    debug_info = {
+        "user_id_querying": user_id,
+        "all_groups": [
+            {
+                "id": g.id,
+                "name": g.name,
+                "creator_id": g.creator_id,
+                "invite_code": g.invite_code,
+                "created_at": str(g.created_at)
+            }
+            for g in all_groups
+        ],
+        "all_members": [
+            {
+                "group_id": m.group_id,
+                "user_id": m.user_id,
+                "role": m.role,
+                "status": m.status
+            }
+            for m in all_members
+        ],
+        "all_users": [
+            {
+                "id": u.id,
+                "name": u.name,
+                "email": u.email
+            }
+            for u in all_users
+        ],
+        "user_groups_memberships": [
+            m.group_id for m in db.query(GroupMember).filter(GroupMember.user_id == user_id).all()
+        ]
+    }
+    return debug_info
+
 @router.get("/groups/user/{user_id}", response_model=list[RideGroupResponse])
 async def get_user_groups(user_id: str, db: Session = Depends(get_db)):
-    """Get all groups a user belongs to."""
+    """Get all groups a user belongs to (as member or creator)."""
+    from sqlalchemy import or_
+
+    logger.debug(f"Fetching groups for user: {user_id}")
+
     memberships = db.query(GroupMember).filter(GroupMember.user_id == user_id).all()
     group_ids = [m.group_id for m in memberships]
-    
-    groups = db.query(RideGroup).filter(RideGroup.id.in_(group_ids)).all()
+    logger.debug(f"User {user_id} has {len(memberships)} memberships: group_ids={group_ids}")
+
+    if group_ids:
+        groups = db.query(RideGroup).filter(
+            or_(
+                RideGroup.id.in_(group_ids),
+                RideGroup.creator_id == user_id
+            )
+        ).all()
+    else:
+        groups = db.query(RideGroup).filter(RideGroup.creator_id == user_id).all()
+
+    logger.debug(f"Found {len(groups)} groups for user {user_id}")
+    for g in groups:
+        logger.debug(f"  Group {g.id}: {g.name} (creator_id={g.creator_id})")
+
     results = []
     for g in groups:
         results.append(await get_group_details(g.id, db))
@@ -1259,9 +1563,10 @@ async def get_group_live_locations(group_id: int, db: Session = Depends(get_db))
     ).all()
     
     active_responses = []
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
     for session in active_sessions:
         # Check if updated in last 5 minutes
-        if datetime.now(timezone.utc) - session.last_updated > timedelta(minutes=5):
+        if not session.last_updated or now_naive - session.last_updated > timedelta(minutes=5):
             session.is_active = False
             db.commit()
             continue
@@ -1415,3 +1720,473 @@ async def upsert_wallet(user_id: str, data: WalletCreate, db: Session = Depends(
         nic_pdf_url=wallet.nic_pdf_url,
         updated_at=str(wallet.updated_at)
     )
+
+
+# ─── Convoy & Group Announcements ──────────────────────────────────────────
+
+@router.post("/groups/{group_id}/convoy/start", response_model=RideGroupResponse)
+async def start_convoy_session(group_id: int, request: ConvoyStartRequest, db: Session = Depends(get_db)):
+    """Start a convoy session for a ride group, specifying a shared destination."""
+    group = db.query(RideGroup).filter(RideGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Ride group not found")
+        
+    group.convoy_active = True
+    group.destination_lat = request.destination_lat
+    group.destination_lon = request.destination_lon
+    group.destination_name = request.destination_name
+    group.convoy_started_at = datetime.now(timezone.utc)
+    
+    # Broadcast a system announcement about the convoy start
+    announcement = GroupAnnouncement(
+        group_id=group_id,
+        sender_id="system",
+        sender_name="System",
+        message=f"Convoy session started to {request.destination_name}!",
+        announcement_type="system"
+    )
+    db.add(announcement)
+    
+    db.commit()
+    db.refresh(group)
+    return await get_group_details(group_id, db)
+
+
+@router.post("/groups/{group_id}/convoy/stop", response_model=RideGroupResponse)
+async def stop_convoy_session(group_id: int, db: Session = Depends(get_db)):
+    """Stop the active convoy session for a ride group."""
+    group = db.query(RideGroup).filter(RideGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Ride group not found")
+        
+    group.convoy_active = False
+    group.destination_lat = None
+    group.destination_lon = None
+    group.destination_name = None
+    group.convoy_started_at = None
+    
+    # Broadcast a system announcement about the convoy stop
+    announcement = GroupAnnouncement(
+        group_id=group_id,
+        sender_id="system",
+        sender_name="System",
+        message="Convoy session has ended.",
+        announcement_type="system"
+    )
+    db.add(announcement)
+    
+    db.commit()
+    db.refresh(group)
+    return await get_group_details(group_id, db)
+
+
+@router.post("/groups/{group_id}/announcements", response_model=GroupAnnouncementResponse)
+async def post_group_announcement(group_id: int, request: AnnouncementCreateRequest, db: Session = Depends(get_db)):
+    """Post a walkie-talkie quick alert or text announcement to a ride group."""
+    group = db.query(RideGroup).filter(RideGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Ride group not found")
+        
+    sender_name = "System"
+    if request.sender_id != "system":
+        user = db.query(User).filter(User.id == request.sender_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="Sender not found")
+        sender_name = user.name
+        
+    announcement = GroupAnnouncement(
+        group_id=group_id,
+        sender_id=request.sender_id,
+        sender_name=sender_name,
+        message=request.message,
+        announcement_type=request.announcement_type
+    )
+    db.add(announcement)
+    db.commit()
+    db.refresh(announcement)
+    
+    return GroupAnnouncementResponse(
+        id=announcement.id,
+        group_id=announcement.group_id,
+        sender_id=announcement.sender_id,
+        sender_name=announcement.sender_name,
+        message=announcement.message,
+        announcement_type=announcement.announcement_type,
+        created_at=str(announcement.created_at)
+    )
+
+
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """Calculate the haversine distance between two points in km."""
+    R = 6371.0
+    d_lat = math.radians(lat2 - lat1)
+    d_lon = math.radians(lon2 - lon1)
+    a = math.sin(d_lat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(d_lon / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+
+@router.get("/groups/{group_id}/convoy/live", response_model=ConvoyLiveDetailsResponse)
+async def get_convoy_live_details(group_id: int, db: Session = Depends(get_db)):
+    """Get real-time details for an active convoy, including coordinates, remaining distance, Lead Car indicator, and route deviation states."""
+    group = db.query(RideGroup).filter(RideGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Ride group not found")
+        
+    # Fetch all group members
+    memberships = db.query(GroupMember).filter(
+        GroupMember.group_id == group_id,
+        GroupMember.status == "JOINED"
+    ).all()
+    user_ids = [m.user_id for m in memberships]
+    
+    # Fetch active live sessions for members
+    active_sessions = db.query(LiveTripSession).filter(
+        LiveTripSession.user_id.in_(user_ids),
+        LiveTripSession.is_active == True
+    ).all()
+    
+    active_member_details = []
+    
+    # Check if sessions are active (within last 5 minutes)
+    valid_sessions = []
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    for s in active_sessions:
+        if not s.last_updated or now_naive - s.last_updated > timedelta(minutes=5):
+            s.is_active = False
+            db.commit()
+            continue
+        valid_sessions.append(s)
+        
+    # Compute distance to destination if convoy is active
+    for s in valid_sessions:
+        user = db.query(User).filter(User.id == s.user_id).first()
+        dist = None
+        is_off_route = False
+        
+        if group.convoy_active and group.destination_lat is not None and s.latitude is not None:
+            dist = haversine_distance(s.latitude, s.longitude, group.destination_lat, group.destination_lon)
+            
+        active_member_details.append({
+            "session": s,
+            "user_name": user.name if user else "Driver",
+            "distance_remaining_km": dist,
+            "is_off_route": is_off_route
+        })
+        
+    # Sort active members by proximity to destination to determine Lead Car (closest first)
+    if group.convoy_active and active_member_details:
+        dist_members = [m for m in active_member_details if m["distance_remaining_km"] is not None]
+        dist_members.sort(key=lambda x: x["distance_remaining_km"])
+        
+        if dist_members:
+            lead_user_id = dist_members[0]["session"].user_id
+            for m in active_member_details:
+                if m["session"].user_id == lead_user_id:
+                    m["is_lead"] = True
+                    
+                    # 🛡️ Cooperative Alert Propagation:
+                    # If the Lead Car's alert level is 'RED', auto-broadcast a hazard announcement to the group
+                    lead_session = m["session"]
+                    if lead_session.alert_level == "RED":
+                        last_scout = db.query(GroupAnnouncement).filter(
+                            GroupAnnouncement.group_id == group_id,
+                            GroupAnnouncement.announcement_type == "hazard_scout"
+                        ).order_by(GroupAnnouncement.created_at.desc()).first()
+                        
+                        should_broadcast = True
+                        if last_scout:
+                            now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+                            if last_scout.created_at:
+                                diff = now_naive - last_scout.created_at
+                                if diff.total_seconds() < 60:
+                                    should_broadcast = False
+                                
+                        if should_broadcast:
+                            scout_announcement = GroupAnnouncement(
+                                group_id=group_id,
+                                sender_id="system",
+                                sender_name="Lead Car Scout",
+                                message=f"Caution! Lead car {m['user_name']} reports high risk hazard ahead!",
+                                announcement_type="hazard_scout"
+                            )
+                            db.add(scout_announcement)
+                            db.commit()
+    
+    # Map to schema response
+    member_responses = []
+    for m in active_member_details:
+        s = m["session"]
+        member_responses.append(ConvoyMemberDetails(
+            user_id=s.user_id,
+            user_name=m["user_name"],
+            latitude=s.latitude,
+            longitude=s.longitude,
+            speed_kph=s.speed_kph,
+            risk_level=s.risk_level,
+            alert_level=s.alert_level,
+            last_updated=str(s.last_updated),
+            distance_remaining_km=m["distance_remaining_km"],
+            is_active=s.is_active,
+            is_lead=m.get("is_lead", False),
+            is_off_route=m["is_off_route"]
+        ))
+        
+    # Fetch last 10 announcements
+    announcements = db.query(GroupAnnouncement).filter(
+        GroupAnnouncement.group_id == group_id
+    ).order_by(GroupAnnouncement.created_at.desc()).limit(10).all()
+    announcements.reverse()
+    
+    announcement_responses = [
+        GroupAnnouncementResponse(
+            id=a.id,
+            group_id=a.group_id,
+            sender_id=a.sender_id,
+            sender_name=a.sender_name,
+            message=a.message,
+            announcement_type=a.announcement_type,
+            created_at=str(a.created_at)
+        )
+        for a in announcements
+    ]
+    
+    # ── Check and Resolve Expired Polls ──
+    now = datetime.now(timezone.utc)
+    expired_polls = db.query(ConvoyPoll).filter(
+        ConvoyPoll.group_id == group_id,
+        ConvoyPoll.status == "active",
+        ConvoyPoll.expires_at < now
+    ).all()
+
+    for p in expired_polls:
+        votes = db.query(ConvoyPollVote).filter(ConvoyPollVote.poll_id == p.id).all()
+        yes_count = sum(1 for v in votes if v.vote == "yes")
+        no_count = sum(1 for v in votes if v.vote == "no")
+        
+        if yes_count > no_count and yes_count > 0:
+            p.status = "accepted"
+            announcement = GroupAnnouncement(
+                group_id=group_id,
+                sender_id="system",
+                sender_name="System",
+                message=f"Shared stop '{p.option_name}' approved after timeout!",
+                announcement_type="system"
+            )
+            db.add(announcement)
+        else:
+            p.status = "rejected"
+            announcement = GroupAnnouncement(
+                group_id=group_id,
+                sender_id="system",
+                sender_name="System",
+                message=f"Shared stop proposal '{p.option_name}' timed out and rejected.",
+                announcement_type="system"
+            )
+            db.add(announcement)
+    if expired_polls:
+        db.commit()
+
+    # Fetch recent/active polls
+    recent_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=15)
+    polls = db.query(ConvoyPoll).filter(
+        ConvoyPoll.group_id == group_id,
+        (ConvoyPoll.status == "active") | (ConvoyPoll.created_at > recent_time)
+    ).all()
+
+    poll_responses = []
+    for p in polls:
+        p_votes = db.query(ConvoyPollVote).filter(ConvoyPollVote.poll_id == p.id).all()
+        yes_voters = [v.user_name for v in p_votes if v.vote == "yes"]
+        no_voters = [v.user_name for v in p_votes if v.vote == "no"]
+        
+        poll_responses.append(ConvoyPollResponse(
+            id=p.id,
+            group_id=p.group_id,
+            creator_id=p.creator_id,
+            creator_name=p.creator_name,
+            poll_type=p.poll_type,
+            option_name=p.option_name,
+            latitude=p.latitude,
+            longitude=p.longitude,
+            status=p.status,
+            yes_votes=yes_voters,
+            no_votes=no_voters,
+            created_at=str(p.created_at),
+            expires_at=str(p.expires_at)
+        ))
+
+    return ConvoyLiveDetailsResponse(
+        group_id=group.id,
+        group_name=group.name,
+        convoy_active=group.convoy_active,
+        destination_lat=group.destination_lat,
+        destination_lon=group.destination_lon,
+        destination_name=group.destination_name,
+        active_members=member_responses,
+        announcements=announcement_responses,
+        active_polls=poll_responses
+    )
+
+
+@router.post("/groups/{group_id}/polls", response_model=ConvoyPollResponse)
+async def create_convoy_poll(group_id: int, request: ConvoyPollCreateRequest, db: Session = Depends(get_db)):
+    """Create a new rest/fuel stop poll inside a convoy."""
+    group = db.query(RideGroup).filter(RideGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    creator = db.query(User).filter(User.id == request.creator_id).first()
+    if not creator:
+        raise HTTPException(status_code=404, detail="Creator not found")
+
+    created_now = datetime.now(timezone.utc)
+    expires_at = created_now + timedelta(minutes=3)
+
+    poll = ConvoyPoll(
+        group_id=group_id,
+        creator_id=request.creator_id,
+        creator_name=creator.name,
+        poll_type=request.poll_type,
+        option_name=request.option_name,
+        latitude=request.latitude,
+        longitude=request.longitude,
+        status="active",
+        created_at=created_now,
+        expires_at=expires_at
+    )
+    db.add(poll)
+    db.commit()
+    db.refresh(poll)
+
+    vote = ConvoyPollVote(
+        poll_id=poll.id,
+        user_id=request.creator_id,
+        user_name=creator.name,
+        vote="yes",
+        created_at=created_now
+    )
+    db.add(vote)
+    
+    announcement = GroupAnnouncement(
+        group_id=group_id,
+        sender_id="system",
+        sender_name="System",
+        message=f"{creator.name} proposed a {request.poll_type} stop: {request.option_name}",
+        announcement_type="system"
+    )
+    db.add(announcement)
+    db.commit()
+    db.refresh(poll)
+
+    return ConvoyPollResponse(
+        id=poll.id,
+        group_id=poll.group_id,
+        creator_id=poll.creator_id,
+        creator_name=poll.creator_name,
+        poll_type=poll.poll_type,
+        option_name=poll.option_name,
+        latitude=poll.latitude,
+        longitude=poll.longitude,
+        status=poll.status,
+        yes_votes=[creator.name],
+        no_votes=[],
+        created_at=str(poll.created_at),
+        expires_at=str(poll.expires_at)
+    )
+
+
+@router.post("/groups/{group_id}/polls/{poll_id}/vote", response_model=ConvoyPollResponse)
+async def vote_convoy_poll(group_id: int, poll_id: int, request: ConvoyPollVoteRequest, db: Session = Depends(get_db)):
+    """Vote 'yes' or 'no' on a convoy poll."""
+    poll = db.query(ConvoyPoll).filter(ConvoyPoll.id == poll_id, ConvoyPoll.group_id == group_id).first()
+    if not poll:
+        raise HTTPException(status_code=404, detail="Poll not found")
+
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    if poll.status != "active" or (poll.expires_at and now_naive > poll.expires_at):
+        raise HTTPException(status_code=400, detail="Poll is no longer active")
+
+    user = db.query(User).filter(User.id == request.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    existing_vote = db.query(ConvoyPollVote).filter(
+        ConvoyPollVote.poll_id == poll_id,
+        ConvoyPollVote.user_id == request.user_id
+    ).first()
+
+    if existing_vote:
+        existing_vote.vote = request.vote
+        existing_vote.created_at = datetime.now(timezone.utc)
+    else:
+        new_vote = ConvoyPollVote(
+            poll_id=poll_id,
+            user_id=request.user_id,
+            user_name=user.name,
+            vote=request.vote
+        )
+        db.add(new_vote)
+
+    db.commit()
+    db.refresh(poll)
+
+    votes = db.query(ConvoyPollVote).filter(ConvoyPollVote.poll_id == poll_id).all()
+    yes_votes = [v.user_name for v in votes if v.vote == "yes"]
+    no_votes = [v.user_name for v in votes if v.vote == "no"]
+
+    memberships = db.query(GroupMember).filter(
+        GroupMember.group_id == group_id,
+        GroupMember.status == "JOINED"
+    ).all()
+    user_ids = [m.user_id for m in memberships]
+    
+    active_driving_count = db.query(LiveTripSession).filter(
+        LiveTripSession.user_id.in_(user_ids),
+        LiveTripSession.is_active == True,
+        LiveTripSession.last_updated > datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=5)
+    ).count()
+
+    total_voters = active_driving_count if active_driving_count > 0 else len(user_ids)
+    majority_threshold = (total_voters / 2) + 0.01
+
+    if len(yes_votes) >= majority_threshold:
+        poll.status = "accepted"
+        announcement = GroupAnnouncement(
+            group_id=group_id,
+            sender_id="system",
+            sender_name="System",
+            message=f"Shared stop '{poll.option_name}' approved by majority!",
+            announcement_type="system"
+        )
+        db.add(announcement)
+    elif len(no_votes) >= majority_threshold or (len(yes_votes) + len(no_votes) == total_voters and len(yes_votes) < len(no_votes)):
+        poll.status = "rejected"
+        announcement = GroupAnnouncement(
+            group_id=group_id,
+            sender_id="system",
+            sender_name="System",
+            message=f"Shared stop proposal '{poll.option_name}' was rejected.",
+            announcement_type="system"
+        )
+        db.add(announcement)
+
+    db.commit()
+    db.refresh(poll)
+
+    return ConvoyPollResponse(
+        id=poll.id,
+        group_id=poll.group_id,
+        creator_id=poll.creator_id,
+        creator_name=poll.creator_name,
+        poll_type=poll.poll_type,
+        option_name=poll.option_name,
+        latitude=poll.latitude,
+        longitude=poll.longitude,
+        status=poll.status,
+        yes_votes=yes_votes,
+        no_votes=no_votes,
+        created_at=str(poll.created_at),
+        expires_at=str(poll.expires_at)
+    )
+

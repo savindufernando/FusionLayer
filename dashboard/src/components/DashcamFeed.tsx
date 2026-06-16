@@ -2,7 +2,6 @@ import { useRef, useEffect, useState } from 'react';
 import * as tf from '@tensorflow/tfjs';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
 import type { FusedPredictionResponse } from '../types';
-import { YoloEdgeModel, type YoloPrediction } from '../services/yolo';
 
 const VEHICLE_CLASSES = ['car', 'motorcycle', 'bus', 'truck', 'bicycle'];
 
@@ -19,10 +18,6 @@ export default function DashcamFeed({ isActive, error, onVideoReady, onVideoUplo
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const readyFired = useRef(false);
-    const yoloModelRef = useRef<YoloEdgeModel | null>(null);
-    
-    const [modelError, setModelError] = useState<string | null>(null);
-    const [yoloCount, setYoloCount] = useState<number>(0);
     const cocoModelRef = useRef<cocoSsd.ObjectDetection | null>(null);
     
     const [isModelLoaded, setIsModelLoaded] = useState(false);
@@ -42,7 +37,6 @@ export default function DashcamFeed({ isActive, error, onVideoReady, onVideoUplo
             try {
                 await tf.ready();
                 
-                let yolo: YoloEdgeModel | null = null;
                 let coco: cocoSsd.ObjectDetection | null = null;
                 
                 try {
@@ -50,17 +44,7 @@ export default function DashcamFeed({ isActive, error, onVideoReady, onVideoUplo
                 } catch (e) {
                     console.error("Failed to load COCO-SSD", e);
                 }
-
-                try {
-                    const m = new YoloEdgeModel();
-                    await m.load();
-                    yolo = m;
-                } catch (e: any) {
-                    console.warn("YOLOv8 failed to load, skipping traffic signs.", e);
-                    setModelError(e.message || String(e));
-                }
                 
-                yoloModelRef.current = yolo;
                 cocoModelRef.current = coco;
                 setIsModelLoaded(true);
                 console.log("Edge AI visualizer models loaded in browser");
@@ -88,68 +72,10 @@ export default function DashcamFeed({ isActive, error, onVideoReady, onVideoUplo
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                     
                     try {
-                        const yoloPromise = yoloModelRef.current ? yoloModelRef.current.detect(video) : Promise.resolve([]);
                         const cocoPromise = cocoModelRef.current ? cocoModelRef.current.detect(video) : Promise.resolve([]);
-                        
-                        const [yoloPredictions, cocoPredictions] = await Promise.all([yoloPromise, cocoPromise]);
+                        const [cocoPredictions] = await Promise.all([cocoPromise]);
                         
                         let signDetectedBbox: [number, number, number, number] | null = null;
-                        
-                        // Process YOLO Predictions (Traffic Signs)
-                        if (yoloPredictions.length > 0) {
-                            // console.log("YOLO Predictions:", yoloPredictions); // Uncomment to debug
-                        }
-                        setYoloCount(yoloPredictions.length);
-                        yoloPredictions.forEach((prediction: YoloPrediction) => {
-                            if (prediction.score > 0.15) {
-                                const videoRatio = video.videoWidth / video.videoHeight;
-                                const containerRatio = canvas.width / canvas.height;
-                                
-                                let renderWidth, renderHeight, offsetX, offsetY;
-                                if (containerRatio > videoRatio) {
-                                    renderWidth = canvas.width;
-                                    renderHeight = canvas.width / videoRatio;
-                                    offsetX = 0;
-                                    offsetY = (canvas.height - renderHeight) / 2;
-                                } else {
-                                    renderHeight = canvas.height;
-                                    renderWidth = canvas.height * videoRatio;
-                                    offsetX = (canvas.width - renderWidth) / 2;
-                                    offsetY = 0;
-                                }
-                                
-                                const scale = renderWidth / video.videoWidth;
-                                
-                                const [x, y, width, height] = prediction.bbox;
-                                const scaledX = (x * scale) + offsetX;
-                                const scaledY = (y * scale) + offsetY;
-                                const scaledWidth = width * scale;
-                                const scaledHeight = height * scale;
-
-                                const strokeColor = '#3b82f6';
-                                const fillColor = 'rgba(59, 130, 246, 0.2)';
-
-                                if (!signDetectedBbox) {
-                                    signDetectedBbox = prediction.bbox;
-                                }
-
-                                // Draw Edge AI Box
-                                ctx.strokeStyle = strokeColor;
-                                ctx.lineWidth = 2;
-                                ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight);
-                                
-                                // Draw Background Label
-                                ctx.fillStyle = fillColor;
-                                const text = `${prediction.class.toUpperCase()} ${(prediction.score * 100).toFixed(0)}%`;
-                                ctx.font = '10px "JetBrains Mono", monospace';
-                                const textWidth = ctx.measureText(text).width;
-                                ctx.fillRect(scaledX, scaledY - 16, textWidth + 8, 16);
-                                
-                                // Draw Text
-                                ctx.fillStyle = '#FFFFFF';
-                                ctx.fillText(text, scaledX + 4, scaledY - 4);
-                            }
-                        });
 
                         // Process COCO-SSD Predictions (Vehicles)
                         cocoPredictions.forEach((prediction: cocoSsd.DetectedObject) => {
@@ -310,17 +236,9 @@ export default function DashcamFeed({ isActive, error, onVideoReady, onVideoUplo
                     style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 5 }}
                 />
 
-                {/* YOLO Error Overlay */}
-                {modelError && (
-                    <div style={{ position: 'absolute', top: '10px', left: '10px', background: 'rgba(220, 38, 38, 0.9)', color: 'white', padding: '8px', borderRadius: '4px', zIndex: 10, fontSize: '12px', maxWidth: '80%' }}>
-                        <strong>YOLO Init Error:</strong> {modelError}
-                    </div>
-                )}
+
                 
-                {/* YOLO Debug Overlay */}
-                <div style={{ position: 'absolute', bottom: '10px', left: '10px', background: 'rgba(0, 0, 0, 0.7)', color: 'white', padding: '4px 8px', borderRadius: '4px', zIndex: 10, fontSize: '12px' }}>
-                    YOLO Signs Returned: {yoloCount}
-                </div>
+
 
                 {/* No-camera overlay */}
                 {!isActive && !error && (

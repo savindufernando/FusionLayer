@@ -294,12 +294,26 @@ class UserCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     email: str = Field(..., min_length=5, max_length=255)
 
+class UserCreateWithPassword(UserCreate):
+    password: str = Field(..., min_length=6)
+
 class UserResponse(BaseModel):
     id: str
     name: str
     email: str
+    profile_picture_url: Optional[str] = None
     created_at: str
     vehicle_count: int = 0
+
+class EmailCheckRequest(BaseModel):
+    email: str
+
+class EmailCheckResponse(BaseModel):
+    exists: bool
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
 
     class Config:
         from_attributes = True
@@ -308,6 +322,7 @@ class UserResponse(BaseModel):
 class VehicleCreate(BaseModel):
     make_model: str = Field(..., min_length=1, max_length=255)
     vehicle_type: str = Field(default="Car")
+    registration_number: Optional[str] = Field(default=None, max_length=50)
     led_stick_mac: Optional[str] = Field(default=None, max_length=17)
 
 class VehicleResponse(BaseModel):
@@ -315,12 +330,20 @@ class VehicleResponse(BaseModel):
     user_id: str
     make_model: str
     vehicle_type: str
+    registration_number: Optional[str]
     led_stick_mac: Optional[str]
     created_at: str
     trip_count: int = 0
 
     class Config:
         from_attributes = True
+
+
+class VehicleUpdateRequest(BaseModel):
+    make_model: Optional[str] = None
+    vehicle_type: Optional[str] = None
+    registration_number: Optional[str] = None
+    led_stick_mac: Optional[str] = None
 
 
 class TripResponse(BaseModel):
@@ -487,6 +510,7 @@ class DriverProfileResponse(BaseModel):
     created_at: str = ""
 
 class ProfileUpdateRequest(BaseModel):
+    name: Optional[str] = None
     bio: Optional[str] = None
     avatar_color: Optional[str] = None
 
@@ -914,3 +938,170 @@ class WalletResponse(WalletCreate):
 
     class Config:
         from_attributes = True
+
+
+# ─── Social: User Status (Stories) ──────────────────────────────────────
+
+class StatusItemCreate(BaseModel):
+    user_id: str
+    content_type: str = "text"  # 'text' or 'image'
+    text_content: Optional[str] = None
+    bg_color: Optional[str] = "#9C27B0"
+    font_family: Optional[str] = "Outfit"
+    media_url: Optional[str] = None
+    share_location: bool = True
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+
+class StatusItemResponse(BaseModel):
+    id: int
+    user_id: str
+    content_type: str
+    text_content: Optional[str] = None
+    bg_color: Optional[str] = None
+    font_family: Optional[str] = None
+    media_url: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    created_at: str
+
+    class Config:
+        from_attributes = True
+
+
+class UserStoriesResponse(BaseModel):
+    user_id: str
+    name: str
+    avatar_color: str
+    driver_level: int
+    safety_score: float
+    last_update_time: str
+    items: List[StatusItemResponse]
+
+
+class StatusFeedResponse(BaseModel):
+    count: int
+    feed: List[UserStoriesResponse]
+
+
+class StatusMapItemResponse(BaseModel):
+    user_id: str
+    name: str
+    avatar_color: str
+    driver_level: int
+    safety_score: float
+    latitude: float
+    longitude: float
+    last_update_time: str
+    item_count: int
+
+
+class StatusMapResponse(BaseModel):
+    count: int
+    items: List[StatusMapItemResponse]
+
+
+class StatusReplyRequest(BaseModel):
+    sender_id: str
+    status_item_id: int
+    message: str
+
+
+class ViewerProfileResponse(BaseModel):
+    user_id: str
+    name: str
+    avatar_color: str
+    driver_level: int
+    safety_score: float
+    viewed_at: str
+
+
+class StatusViewersResponse(BaseModel):
+    status_item_id: int
+    viewer_count: int
+    viewers: List[ViewerProfileResponse]
+
+
+# ─── Ride Group Convoy Schemas ──────────────────────────────────────────
+
+class ConvoyStartRequest(BaseModel):
+    destination_lat: float = Field(..., ge=-90, le=90)
+    destination_lon: float = Field(..., ge=-180, le=180)
+    destination_name: str
+
+class AnnouncementCreateRequest(BaseModel):
+    sender_id: str
+    message: str
+    announcement_type: str = "text"
+
+class GroupAnnouncementResponse(BaseModel):
+    id: int
+    group_id: int
+    sender_id: str
+    sender_name: str
+    message: str
+    announcement_type: str
+    created_at: str
+
+    class Config:
+        from_attributes = True
+
+class ConvoyMemberDetails(BaseModel):
+    user_id: str
+    user_name: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    speed_kph: Optional[float] = None
+    risk_level: Optional[str] = None
+    alert_level: Optional[str] = None
+    last_updated: Optional[str] = None
+    distance_remaining_km: Optional[float] = None
+    is_active: bool = False
+    is_lead: bool = False
+    is_off_route: bool = False
+
+class ConvoyLiveDetailsResponse(BaseModel):
+    group_id: int
+    group_name: Optional[str] = None
+    convoy_active: bool
+    destination_lat: Optional[float] = None
+    destination_lon: Optional[float] = None
+    destination_name: Optional[str] = None
+    active_members: List[ConvoyMemberDetails]
+    announcements: List[GroupAnnouncementResponse]
+    active_polls: List[ConvoyPollResponse] = []
+
+
+class ConvoyPollCreateRequest(BaseModel):
+    poll_type: str = Field(default="rest")  # 'fuel', 'rest', 'custom'
+    option_name: str
+    latitude: float
+    longitude: float
+    creator_id: str
+
+
+class ConvoyPollVoteRequest(BaseModel):
+    user_id: str
+    vote: str  # 'yes', 'no'
+
+
+class ConvoyPollResponse(BaseModel):
+    id: int
+    group_id: int
+    creator_id: str
+    creator_name: str
+    poll_type: str
+    option_name: str
+    latitude: float
+    longitude: float
+    status: str  # 'active', 'accepted', 'rejected'
+    yes_votes: List[str] = []
+    no_votes: List[str] = []
+    created_at: str
+    expires_at: str
+
+    class Config:
+        from_attributes = True
+
+

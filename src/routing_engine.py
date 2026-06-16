@@ -17,7 +17,69 @@ class RoutingEngine:
         self.edge_map = {}
         self.node_coords = {}
         self._load_graph()
+        self.hotspots = []
+        self._load_hotspots()
         print(f"RoutingEngine loaded {len(self.G.nodes)} nodes and {len(self.G.edges)} edges.")
+
+    def _load_hotspots(self):
+        """Loads permanent hotspots from MySQL database"""
+        self.hotspots = []
+        try:
+            from api.database import SessionLocal
+            from api.models import PermanentHotspot
+            
+            db = SessionLocal()
+            try:
+                rows = db.query(PermanentHotspot).filter(PermanentHotspot.is_active == True).all()
+                self.hotspots = [
+                    {
+                        "latitude": h.latitude,
+                        "longitude": h.longitude,
+                        "risk_boost": h.risk_boost or 0.5
+                    }
+                    for h in rows
+                ]
+                print(f"RoutingEngine: Loaded {len(self.hotspots)} permanent hotspots from MySQL.")
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"RoutingEngine Warning: Could not load hotspots from MySQL: {e}. Using empty default list.")
+            self.hotspots = []
+
+    def _haversine(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """Calculates distance between two points in km"""
+        R = 6371.0
+        d_lat = math.radians(lat2 - lat1)
+        d_lon = math.radians(lon2 - lon1)
+        a = math.sin(d_lat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(d_lon / 2) ** 2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return R * c
+
+    def _get_hotspot_penalty(self, lat: float, lon: float) -> float:
+        """Calculates risk boost penalty based on distance to cached hotspots"""
+        max_penalty = 0.0
+        for h in self.hotspots:
+            dist = self._haversine(lat, lon, h["latitude"], h["longitude"])
+            if dist <= 0.5: # 500 meters
+                # Linear falloff penalty: full penalty at 0m, 0 penalty at 500m
+                penalty = h["risk_boost"] * (1.0 - (dist / 0.5))
+                if penalty > max_penalty:
+                    max_penalty = penalty
+        return max_penalty
+
+    def _calculate_route_safety_score(self, coordinates: List[List[float]]) -> float:
+        """Calculates a safety score percentage for a route based on proximity to hotspots"""
+        if not self.hotspots:
+            return 100.0
+            
+        penalty_sum = 0.0
+        for point in coordinates:
+            penalty = self._get_hotspot_penalty(point[0], point[1])
+            penalty_sum += penalty
+            
+        # Normalize: each full penalty (1.0) deducts 10% from the safety score. Clamp between 30% and 100%.
+        score = 100.0 - (penalty_sum * 10.0)
+        return max(30.0, min(100.0, score))
 
     def _load_graph(self):
         """Loads nodes and edges from SQLite into NetworkX"""
@@ -76,21 +138,15 @@ class RoutingEngine:
         
         if not start_node or not end_node:
             raise ValueError("Could not map start or end coordinates to the road network.")
-
-        # If we have a predictor, apply dynamic weights
-        # Otherwise fall back to distance
+        
         def weight_func(u, v, d):
             base_length = d.get('length', 10.0)
             
-            if self.predictor and safety_weight > 0:
-                penalty = 0
-                if hasattr(self.predictor, 'accident_reports') and self.predictor.accident_reports:
-                    # Rough check using edge coordinates
-                    n_lat, n_lon = self.node_coords[u]
-                    boost, _ = self.predictor.accident_reports.get_risk_boost(n_lat, n_lon)
-                    penalty = boost * 10 * safety_weight # Amplified penalty
-                
-                return base_length * (1 + penalty)
+            if safety_weight > 0 and self.hotspots:
+                n_lat, n_lon = self.node_coords[u]
+                penalty = self._get_hotspot_penalty(n_lat, n_lon)
+                # Apply penalty scaled by safety_weight
+                return base_length * (1 + penalty * 5.0 * safety_weight)
             else:
                 return base_length
 

@@ -29,10 +29,12 @@ class User(Base):
     id = Column(String(36), primary_key=True, default=generate_uuid)
     name = Column(String(255), nullable=False)
     email = Column(String(255), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Social / Gamification fields
     avatar_color = Column(String(7), default="#00E676")
+    profile_picture_url = Column(String(512), nullable=True)
     bio = Column(String(255), default="")
     safety_score = Column(Float, default=100.0)
     total_trips = Column(Integer, default=0)
@@ -40,8 +42,27 @@ class User(Base):
     xp_points = Column(Integer, default=0)
     driver_level = Column(Integer, default=1)
 
-    # Relationships
+    # GDPR Consent
+    gdpr_consent = Column(Boolean, default=False)
+    gdpr_consent_date = Column(DateTime, nullable=True)
+
+    # Relationships (with cascade for GDPR Right to be Forgotten)
     vehicles = relationship("Vehicle", back_populates="owner", cascade="all, delete-orphan")
+    blackspot_reports = relationship("BlackspotReport", cascade="all, delete-orphan")
+    insurance_claims = relationship("InsuranceClaim", cascade="all, delete-orphan")
+    accident_reports = relationship("AccidentReport", cascade="all, delete-orphan")
+    shared_trips = relationship("SharedTrip", cascade="all, delete-orphan")
+    live_sessions = relationship("LiveTripSession", cascade="all, delete-orphan")
+
+# ─── Admin User ───────────────────────────────────────────────────────────
+
+class AdminUser(Base):
+    __tablename__ = "admin_users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(50), unique=True, nullable=False)
+    password = Column(String(255), nullable=False) # In a real app, this should be hashed
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 # ─── Vehicle ──────────────────────────────────────────────────────────────
@@ -53,6 +74,7 @@ class Vehicle(Base):
     user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
     make_model = Column(String(255), nullable=False)              # e.g., "Toyota Aqua"
     vehicle_type = Column(String(50), default="Car")              # Car, Motorcycle, Van
+    registration_number = Column(String(50), nullable=True)       # e.g., "ABC-1234"
     led_stick_mac = Column(String(17), nullable=True)             # BLE MAC address
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -403,7 +425,15 @@ class RideGroup(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     invite_code = Column(String(6), unique=True, nullable=False)
+    creator_id = Column(String(36), ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    # Convoy tracking fields
+    convoy_active = Column(Boolean, default=False)
+    destination_lat = Column(Float, nullable=True)
+    destination_lon = Column(Float, nullable=True)
+    destination_name = Column(String(255), nullable=True)
+    convoy_started_at = Column(DateTime, nullable=True)
 
 class GroupMember(Base):
     __tablename__ = "group_members"
@@ -442,3 +472,85 @@ class DigitalWallet(Base):
 
     # Relationship
     user = relationship("User", backref="wallet")
+
+
+# ─── Social: User Status (Stories) ──────────────────────────────────────
+
+class UserStatusItem(Base):
+    __tablename__ = "user_status_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    content_type = Column(String(20), default="text")  # 'text' or 'image'
+    text_content = Column(String(255), nullable=True)
+    bg_color = Column(String(30), default="#9C27B0")    # Hex or gradient color
+    font_family = Column(String(30), default="Outfit")  # Font face selection
+    media_url = Column(String(512), nullable=True)     # Link for photo status
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime, nullable=False)
+
+    user = relationship("User", back_populates="statuses" if hasattr(User, "statuses") else None, backref="statuses")
+
+
+class UserStatusView(Base):
+    __tablename__ = "user_status_views"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    status_item_id = Column(Integer, ForeignKey("user_status_items.id", ondelete="CASCADE"), nullable=False)
+    viewer_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    viewed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    status_item = relationship("UserStatusItem", backref="views")
+    viewer = relationship("User", backref="status_views")
+
+
+class GroupAnnouncement(Base):
+    __tablename__ = "group_announcements"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(Integer, ForeignKey("ride_groups.id", ondelete="CASCADE"), nullable=False)
+    sender_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    sender_name = Column(String(255), nullable=False)
+    message = Column(String(255), nullable=False)
+    announcement_type = Column(String(30), default="text")  # 'fuel', 'obstacle', 'police', 'hazard_scout', 'text'
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    group = relationship("RideGroup", backref="announcements")
+    sender = relationship("User", backref="announcements")
+
+
+class ConvoyPoll(Base):
+    __tablename__ = "convoy_polls"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(Integer, ForeignKey("ride_groups.id", ondelete="CASCADE"), nullable=False)
+    creator_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    creator_name = Column(String(255), nullable=False)
+    poll_type = Column(String(30), default="rest")  # 'fuel', 'rest', 'custom'
+    option_name = Column(String(255), nullable=False)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    status = Column(String(20), default="active")  # 'active', 'accepted', 'rejected'
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime, nullable=False)
+
+    group = relationship("RideGroup", backref="polls")
+    creator = relationship("User", backref="created_polls")
+
+
+class ConvoyPollVote(Base):
+    __tablename__ = "convoy_poll_votes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    poll_id = Column(Integer, ForeignKey("convoy_polls.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_name = Column(String(255), nullable=False)
+    vote = Column(String(10), nullable=False)  # 'yes', 'no'
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    poll = relationship("ConvoyPoll", backref="votes")
+    user = relationship("User", backref="poll_votes")
+
+

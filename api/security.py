@@ -49,6 +49,7 @@ PUBLIC_PREFIXES = (
     "/api/mobile",       # Flutter app endpoints (no API key needed)
     "/api/social",       # Social/Community features (making public for dev)
     "/dashboard",
+    "/uploads",          # Uploaded status photos (public static files)
     "/assets",
     "/ws",
 )
@@ -155,19 +156,20 @@ def apply_security(app: FastAPI, module_name: str = "api"):
         origins = ["*"]
         logger.warning(f"[{module_name}] CORS open to all origins (dev mode)")
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*", "X-API-Key"],
-    )
-
     # 3. Security headers
     app.add_middleware(SecurityHeadersMiddleware)
 
     # 4. API key middleware
     app.add_middleware(APIKeyMiddleware, api_key=api_key if api_key else None)
+
+    # 5. CORS MUST BE ADDED LAST TO BE THE OUTERMOST MIDDLEWARE!
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=origins != ["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # 5. Rate limiting
     if HAS_SLOWAPI:
